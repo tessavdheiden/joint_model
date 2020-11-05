@@ -23,8 +23,8 @@ def train(args):
     controller = Controller()
     env = PendulumEnv()
     env.seed(0)
-    bayes_filter = BayesFilter(args)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
+    bayes_filter = BayesFilter.init_from_replay_memory(replay_memory)
 
     records = [None] * args.num_epochs
 

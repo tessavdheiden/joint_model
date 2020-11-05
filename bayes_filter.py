@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 
 
-
 class Generator(nn.Module):
     def __init__(self, z_dim, h_dim, x_dim, w_dim, T):
         super(Generator, self).__init__()
@@ -40,13 +39,14 @@ class Generator(nn.Module):
 
 
 class BayesFilter(nn.Module):
-    def __init__(self, args):
+    def __init__(self, seq_length, x_dim, u_dim):
 
         super(BayesFilter, self).__init__()
-        self.T = args.seq_length
+        self.T = seq_length
+        self.x_dim = x_dim
+        self.u_dim = u_dim
+
         self.z_dim = 3
-        self.x_dim = 3
-        self.u_dim = 1
         self.w_dim = 6
         self.h_dim = 128
         self.M = 16
@@ -120,33 +120,8 @@ class BayesFilter(nn.Module):
         x_pred[:, 0] = self._sample_x_(z)
         w_dists = self.cast(torch.zeros(batch_size, self.T, self.w_dim, 2))
         w_dists[:, 0] = torch.stack([w1_μ, w1_σ], dim=-1)
-        for t in range(1, self.T):
-            (a, b, c) = self._sample_v()
-            (a, b, c) = self._repeat(a, b, c, batch_size)
-            (α_A, α_B, α_C) = self._compute_α(torch.cat((z, u[:, t]), dim=1))
-            A = torch.sum(α_A * a, axis=1)
-            B = torch.sum(α_B * b, axis=1)
-            C = torch.sum(α_C * c, axis=1)
-            w, (w_μ, w_σ) = self._sample_w(z, x[:, t], u[:, t])
-            w_dists[:, t] = torch.stack([w_μ, w_σ], dim=-1)
-            z_ = torch.bmm(A, z.view(-1, self.z_dim, 1)) + torch.bmm(B, u[:, t].view(-1, self.u_dim, 1)) + torch.bmm(C, w.view(-1, self.w_dim, 1))
-            z_ = z_.squeeze(2)
-            x_pred[:, t] = self._sample_x_(z_)
-            z = z_
-
-        return x_pred, w_dists
-
-    def compute(self, x, u):
-        #self._prepare_compute()
-        batch_size = x.shape[0]
-        x, u = self.cast(x), self.cast(u)
-        z, (w1_μ, w1_σ) = self._initial_generator(x)
-
-        x_pred = self.cast(torch.zeros(batch_size, self.T, self.x_dim))
-        x_pred[:, 0] = self._sample_x_(z)
         z_pred = self.cast(torch.zeros(batch_size, self.T, self.z_dim))
         z_pred[:, 0] = z
-
         for t in range(1, self.T):
             (a, b, c) = self._sample_v()
             (a, b, c) = self._repeat(a, b, c, batch_size)
@@ -155,14 +130,14 @@ class BayesFilter(nn.Module):
             B = torch.sum(α_B * b, axis=1)
             C = torch.sum(α_C * c, axis=1)
             w, (w_μ, w_σ) = self._sample_w(z, x[:, t], u[:, t - 1])
-            z_ = torch.bmm(A, z.view(-1, self.z_dim, 1)) + torch.bmm(B, u[:, t - 1].view(-1, self.u_dim, 1)) \
-                 + torch.bmm(C, w.view(-1, self.w_dim, 1))
+            w_dists[:, t] = torch.stack([w_μ, w_σ], dim=-1)
+            z_ = torch.bmm(A, z.view(-1, self.z_dim, 1)) + torch.bmm(B, u[:, t - 1].view(-1, self.u_dim, 1)) + torch.bmm(C, w.view(-1, self.w_dim, 1))
             z_ = z_.squeeze(2)
             x_pred[:, t] = self._sample_x_(z_)
             z_pred[:, t] = z_
             z = z_
 
-        return x_pred, z_pred
+        return x_pred, w_dists, z_pred
 
     @property
     def params(self):
@@ -178,14 +153,14 @@ class BayesFilter(nn.Module):
     def _prepare_update(self):
         for network in self.networks:
             network.train()
-        #     network.to('cuda')
-        #
-        # self.q_φ_A = self.q_φ_A.cuda()
-        # self.q_φ_B = self.q_φ_B.cuda()
-        # self.q_φ_C = self.q_φ_C.cuda()
-        #
-        # self.loss_rec = self.loss_rec.cuda()
-        # self.cast = lambda x: x.cuda()
+            network.to('cuda:0')
+
+        self.q_φ_A = self.q_φ_A.cuda()
+        self.q_φ_B = self.q_φ_B.cuda()
+        self.q_φ_C = self.q_φ_C.cuda()
+
+        self.loss_rec = self.loss_rec.cuda()
+        self.cast = lambda x: x.cuda()
 
     def _prepare_compute(self):
         for network in self.networks:
@@ -205,9 +180,9 @@ class BayesFilter(nn.Module):
         self.loss_rec = nn.MSELoss()
 
     def update(self, x, u, debug=False):
-        self._prepare_update()
-        # x, u = self.cast(x), self.cast(u)
-        x_pred, w_dists = self.forward(x, u)
+        #self._prepare_update()
+        x, u = self.cast(x), self.cast(u)
+        x_pred, w_dists, _ = self(x, u)
 
         L_rec = self.loss_rec(x_pred[:, 0:self.T].reshape(-1, self.x_dim), x[:, 0:self.T].reshape(-1, self.x_dim))
 
@@ -225,6 +200,7 @@ class BayesFilter(nn.Module):
         self.optimizer.step()
 
         self.it += 1
+        #self._prepare_compute()
         return L_rec.item(), L_KLD.item()
 
     def save_params(self, path='dvbf_generator_params.pkl'):
@@ -232,3 +208,8 @@ class BayesFilter(nn.Module):
 
     def load_params(self, path='dvbf_generator_params.pkl'):
         self.load_state_dict(torch.load(path))
+
+    @classmethod
+    def init_from_replay_memory(cls, replay_memory):
+        instance = cls(seq_length=replay_memory.seq_length, x_dim=replay_memory.state_dim, u_dim=replay_memory.action_dim)
+        return instance

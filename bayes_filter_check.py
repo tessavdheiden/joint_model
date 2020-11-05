@@ -33,8 +33,7 @@ def visualize_predictions(args, bayes_filter, replay_memory):
 
     x = torch.cat(x_all, dim=0)
     u = torch.cat(u_all, dim=0)
-
-    x_, z = bayes_filter.compute(x, u)
+    x_, _, z = bayes_filter(x, u)
     z = z.detach().numpy()
 
     x = x.reshape(-1, bayes_filter.x_dim)
@@ -80,7 +79,7 @@ def main():
     env = PendulumEnv()
 
     replay_memory = ReplayMemory(args, controller=controller, env=env)
-    bayes_filter = BayesFilter(args)
+    bayes_filter = BayesFilter.init_from_replay_memory(replay_memory)
     bayes_filter.load_params()
 
     visualize_predictions(args, bayes_filter, replay_memory)
