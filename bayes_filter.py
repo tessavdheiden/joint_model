@@ -203,10 +203,10 @@ class BayesFilter(nn.Module):
         #self._prepare_compute()
         return L_rec.item(), L_KLD.item()
 
-    def save_params(self, path='dvbf_generator_params.pkl'):
+    def save_params(self, path='param/dvbf_generator_params.pkl'):
         torch.save(self.state_dict(), path)
 
-    def load_params(self, path='dvbf_generator_params.pkl'):
+    def load_params(self, path='param/dvbf_generator_params.pkl'):
         self.load_state_dict(torch.load(path))
 
     @classmethod

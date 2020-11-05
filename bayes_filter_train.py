@@ -1,8 +1,8 @@
 import matplotlib.pyplot as plt
-import argparse
 from collections import namedtuple
 import torch
 import numpy as np
+import os
 from mpl_toolkits.mplot3d import Axes3D
 
 
@@ -16,16 +16,7 @@ Record = namedtuple('Record', ['ep', 'l_r', 'l_k'])
 
 
 # Plot predictions against true time evolution
-def train(args):
-    torch.manual_seed(0)
-    np.random.seed(0)
-
-    controller = Controller()
-    env = PendulumEnv()
-    env.seed(0)
-    replay_memory = ReplayMemory(args, controller=controller, env=env)
-    bayes_filter = BayesFilter.init_from_replay_memory(replay_memory)
-
+def train(replay_memory, bayes_filter):
     records = [None] * args.num_epochs
 
     for i in range(args.num_epochs):
@@ -38,7 +29,7 @@ def train(args):
 
         if i % 10 == 0:
             with torch.no_grad():
-                visualize_predictions(args, bayes_filter, replay_memory)
+                visualize_predictions(bayes_filter, replay_memory)
 
         records[i] = Record(i, L_rec, L_KLD)
         print(f'ep = {i}, L_rec = {L_rec:.2f} L_KLD = {L_KLD:.4f}')
@@ -51,21 +42,25 @@ def train(args):
     ax2.set_ylabel('KL', color='r')
     ax2.grid('on')
     fig.tight_layout()
-    plt.savefig('loss.png')
+    plt.savefig('img/loss.png')
     bayes_filter.save_params()
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--val_frac', type=float, default=0.1, help='fraction of data to be witheld in validation set')
-    parser.add_argument('--seq_length', type=int, default=32, help='sequence length for training')
-    parser.add_argument('--batch_size', type=int, default=64, help='minibatch size')
+    from args import args
 
-    parser.add_argument('--num_epochs', type=int, default=300, help='number of epochs')
+    if not os.path.exists('img'):
+        os.makedirs('img')
+    if not os.path.exists('param'):
+        os.makedirs('param')
 
-    parser.add_argument('--n_trials', type=int, default=200, help='number of data sequences to collect in each episode')
-    parser.add_argument('--trial_len', type=int, default=256, help='number of steps in each trial')
-    parser.add_argument('--n_subseq', type=int, default=8, help='number of subsequences to divide each sequence into')
-    args = parser.parse_args()
+    torch.manual_seed(0)
+    np.random.seed(0)
+    env = PendulumEnv()
+    env.seed(0)
 
-    train(args)
+    controller = Controller()
+    replay_memory = ReplayMemory(args, controller=controller, env=env)
+    bayes_filter = BayesFilter.init_from_replay_memory(replay_memory)
+
+    train(replay_memory, bayes_filter)
