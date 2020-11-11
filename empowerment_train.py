@@ -13,22 +13,22 @@ from replay_memory import ReplayMemory
 from empowerment_check import visualize_predictions
 
 
-Transition = namedtuple('Transition', ['s', 'a', 's_'])
 Record = namedtuple('Transition', ['ep', 'E'])
 
 
-def train_empowerment(env, empowerment, replay_memory, args):
+def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
     records = [None] * args.num_epochs
 
     for i in range(args.num_epochs):
         replay_memory.reset_batchptr_train()
 
-        E = np.zeros((replay_memory.n_batches_train, args.batch_size * (args.seq_length - 1)))
+        E = np.zeros((replay_memory.n_batches_train, args.batch_size * args.seq_length))
         for b in range(replay_memory.n_batches_train):
             batch_dict = replay_memory.next_batch_train()
-            x, u = batch_dict["states"], batch_dict['inputs']
-            transitions = [Transition(x[j][t], u[j][t], x[j][t+1]) for j in range(len(x)) for t in range(len(x[j])-1)]
-            E[b, :] = empowerment.update(transitions)
+            x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
+
+            _, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
+            E[b, :] = empowerment.update(z_pred.view(-1, z_pred.shape[2]))
 
         if i % 10 == 0:
             with torch.no_grad():
@@ -39,8 +39,8 @@ def train_empowerment(env, empowerment, replay_memory, args):
 
     env.close()
     fig, ax = plt.subplots()
-    ax.scatter([r.ep for r in records], [r.r for r in records], c='b')
-    ax.set_ylabel('reward', color='b')
+    # ax.scatter([r.ep for r in records], [r.r for r in records], c='b')
+    # ax.set_ylabel('reward', color='b')
     ax2 = ax.twinx()
     ax2.scatter([r.ep for r in records], [r.E for r in records], c='r')
     ax2.set_ylabel('empowerment', color='r')
@@ -68,7 +68,7 @@ def main():
 
     empowerment = Empowerment(env, controller=controller, transition_network=bayes_filter)
 
-    train_empowerment(env, empowerment, replay_memory, args)
+    train_empowerment(env, empowerment, bayes_filter, replay_memory, args)
 
 
 if __name__ == '__main__':

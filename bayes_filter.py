@@ -81,10 +81,13 @@ class BayesFilter(nn.Module):
                                    nn.Softplus())
 
     def _create_decoding_network(self):
-        self.p_θ = nn.Sequential(nn.Linear(self.z_dim, self.h_dim),
-                                 nn.Linear(self.h_dim, self.x_dim))
-        # self.p_θ_μ = nn.Linear(self.z_dim, self.x_dim)
-        # self.p_θ_σ = nn.Linear(self.z_dim, self.x_dim)
+        # self.p_θ = nn.Sequential(nn.Linear(self.z_dim, self.h_dim),
+        #                          nn.Linear(self.h_dim, self.x_dim))
+        self.p_θ_μ = nn.Sequential(nn.Linear(self.z_dim, self.h_dim),
+                                   nn.Linear(self.h_dim, self.x_dim))
+        self.p_θ_σ = nn.Sequential(nn.Linear(self.z_dim, self.h_dim),
+                                   nn.Linear(self.h_dim, self.x_dim),
+                                   nn.Softplus())
 
     def _compute_α(self, zu):
         α = torch.softmax(self.f_ψ(zu).view(-1, self.M, 1, 1), dim=1)
@@ -106,22 +109,31 @@ class BayesFilter(nn.Module):
         return w, (w_μ, w_σ)
 
     def _sample_x_(self, z_):
-        return self.p_θ(z_)
-        # x_μ, x_σ = self.p_θ_μ(z_), self.p_θ_σ(z_)
-        # dist = Normal(x_μ, x_σ)
-        # return dist.rsample()
+        # return self.p_θ(z_)
+        p_μ, p_σ = self.p_θ_μ(z_), self.p_θ_σ(z_)
+        dist_p_θ = Normal(p_μ, p_σ)
+        x_ = dist_p_θ.sample()
+        return x_, (p_μ, p_σ)
 
-    def forward(self, x, u):
+    def _init_output(self, batch_size):
+        x_pred = self.cast(torch.zeros(batch_size, self.T, self.x_dim))
+        x_dists = self.cast(torch.zeros(batch_size, self.T, self.x_dim, 2))
+        w_dists = self.cast(torch.zeros(batch_size, self.T, self.w_dim, 2))
+        z_pred = self.cast(torch.zeros(batch_size, self.T, self.z_dim))
+        return x_pred, w_dists, z_pred, x_dists
+
+    def propagate_solution(self, x, u):
         batch_size = x.shape[0]
 
         z, (w1_μ, w1_σ) = self._initial_generator(x)
 
-        x_pred = self.cast(torch.zeros(batch_size, self.T, self.x_dim))
-        x_pred[:, 0] = self._sample_x_(z)
-        w_dists = self.cast(torch.zeros(batch_size, self.T, self.w_dim, 2))
+        x_pred, w_dists, z_pred, x_dists = self._init_output(batch_size)
+        x1, (x1_μ, x1_σ) = self._sample_x_(z)
+        x_pred[:, 0] = x1
+        x_dists[:, 0] = torch.stack([x1_μ, x1_σ], dim=-1)
         w_dists[:, 0] = torch.stack([w1_μ, w1_σ], dim=-1)
-        z_pred = self.cast(torch.zeros(batch_size, self.T, self.z_dim))
         z_pred[:, 0] = z
+
         for t in range(1, self.T):
             (a, b, c) = self._sample_v()
             (a, b, c) = self._repeat(a, b, c, batch_size)
@@ -133,18 +145,38 @@ class BayesFilter(nn.Module):
             w_dists[:, t] = torch.stack([w_μ, w_σ], dim=-1)
             z_ = torch.bmm(A, z.view(-1, self.z_dim, 1)) + torch.bmm(B, u[:, t - 1].view(-1, self.u_dim, 1)) + torch.bmm(C, w.view(-1, self.w_dim, 1))
             z_ = z_.squeeze(2)
-            x_pred[:, t] = self._sample_x_(z_)
+            x_, (x_μ, x_σ) = self._sample_x_(z_)
+            x_pred[:, t] = x_
+            x_dists[:, t] = torch.stack([x_μ, x_σ], dim=-1)
             z_pred[:, t] = z_
             z = z_
 
-        return x_pred, w_dists, z_pred
+        return x_pred, w_dists, z_pred, x_dists
+
+    def forward(self, z, u):
+        batch_size = u.shape[0]
+
+        (a, b, c) = self._sample_v()
+        (a, b, c) = self._repeat(a, b, c, batch_size)
+        (α_A, α_B, α_C) = self._compute_α(torch.cat((z, u), dim=1))
+        A = torch.sum(α_A * a, axis=1)
+        B = torch.sum(α_B * b, axis=1)
+        C = torch.sum(α_C * c, axis=1)
+        (w_μ, w_σ) = torch.zeros((batch_size, self.w_dim)), torch.ones((batch_size, self.w_dim))
+        w_dist = Normal(w_μ, w_σ)
+        w = w_dist.sample()
+        z_ = torch.bmm(A, z.view(-1, self.z_dim, 1)) + torch.bmm(B, u.view(-1, self.u_dim, 1)) + torch.bmm(C, w.view(-1, self.w_dim, 1))
+        z_ = z_.squeeze(2)
+        z = z_
+        return z
 
     @property
     def params(self):
         return list(self._initial_generator.params) + list(self.f_ψ.parameters()) \
                + list(self.q_χ_μ.parameters()) + list(self.q_χ_σ.parameters()) \
-               + list(self.p_θ.parameters()) + [self.q_φ_A] + [self.q_φ_B] + [self.q_φ_C]
-               #+ list(self.p_θ_μ.parameters()) + list(self.p_θ_σ.parameters())
+               + list(self.p_θ_μ.parameters()) + list(self.p_θ_σ.parameters()) \
+               + [self.q_φ_A] + [self.q_φ_B] + [self.q_φ_C]
+               # + list(self.p_θ.parameters())
 
     @property
     def networks(self):
@@ -182,9 +214,13 @@ class BayesFilter(nn.Module):
     def update(self, x, u, debug=False):
         #self._prepare_update()
         x, u = self.cast(x), self.cast(u)
-        x_pred, w_dists, _ = self(x, u)
+        x_pred, w_dists, _, x_dists = self.propagate_solution(x, u)
 
-        L_rec = self.loss_rec(x_pred[:, 0:self.T].reshape(-1, self.x_dim), x[:, 0:self.T].reshape(-1, self.x_dim))
+        # with torch.no_grad():
+        #     L_rec = self.loss_rec(x_pred[:, 0:self.T].reshape(-1, self.x_dim), x[:, 0:self.T].reshape(-1, self.x_dim))
+        x_μ, x_σ = x_dists[:, :, :, 0], x_dists[:, :, :, 1] + 1e-3
+        dists = Normal(x_μ, x_σ)
+        L_nll = -dists.log_prob(x[:, :]).sum(-1).mean()
 
         if self.it % 10 == 0 and debug:
             print(f"x_pred[:, 0], x[:, 0] = {x_pred[0, 0].detach()} {x[0, 0].detach()}")
@@ -193,15 +229,15 @@ class BayesFilter(nn.Module):
         μ, σ = w_dists[:, :, :, 0], w_dists[:, :, :, 1] + 1e-3
         p = Normal(μ, σ)
         q = Normal(torch.zeros_like(μ), torch.ones_like(σ))
-        L_KLD = torch.distributions.kl.kl_divergence(p, q).mean()
+        L_KLD = torch.distributions.kl.kl_divergence(p, q).sum(-1).mean()
         self.optimizer.zero_grad()
-        L = L_rec + L_KLD
+        L = L_nll + L_KLD
         L.backward()
         self.optimizer.step()
 
         self.it += 1
         #self._prepare_compute()
-        return L_rec.item(), L_KLD.item()
+        return L_nll.item(), L_KLD.item()
 
     def save_params(self, path='param/dvbf_generator_params.pkl'):
         torch.save(self.state_dict(), path)

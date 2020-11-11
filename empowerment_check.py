@@ -4,13 +4,13 @@ import matplotlib.pyplot as plt
 
 
 def visualize_predictions(empowerment):
-    x_pxl, y_pxl = 300, 400
+    x_pxl, y_pxl = 100, 100
 
-    state = torch.Tensor([[np.cos(theta), np.sin(theta), thetadot]
+    s = torch.Tensor([[np.cos(theta), np.sin(theta), thetadot]
                           for thetadot in np.linspace(-8, 8, y_pxl)
                           for theta in np.linspace(-np.pi, np.pi, x_pxl)])
 
-    v = empowerment.compute(state)
+    v = empowerment(s)
     value_map = v.view(y_pxl, x_pxl).detach().numpy()
 
     fig = plt.figure()

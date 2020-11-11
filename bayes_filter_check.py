@@ -34,7 +34,7 @@ def visualize_predictions(bayes_filter, replay_memory):
     x = torch.cat(x_all, dim=0)
     u = torch.cat(u_all, dim=0)
 
-    x_, _, z = bayes_filter(x, u)
+    x_, _, z, _ = bayes_filter.propagate_solution(x, u)
     z = z.detach().numpy()
 
     x = x.reshape(-1, bayes_filter.x_dim)
