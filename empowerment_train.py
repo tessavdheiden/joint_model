@@ -6,11 +6,12 @@ import matplotlib.pyplot as plt
 
 
 from pendulum_v2 import PendulumEnv
+from ball_box import BallBoxEnv
 from empowerment import Empowerment
 from controller import Controller
 from bayes_filter import BayesFilter
 from replay_memory import ReplayMemory
-from empowerment_check import visualize_predictions
+from empowerment_check import visualize_predictions_angles, visualize_predictions_positions
 
 
 Record = namedtuple('Transition', ['ep', 'E'])
@@ -32,7 +33,10 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
 
         if i % 10 == 0:
             with torch.no_grad():
-                visualize_predictions(empowerment)
+                if isinstance(env, PendulumEnv):
+                    visualize_predictions_angles(empowerment)
+                elif isinstance(env, BallBoxEnv):
+                    visualize_predictions_positions(empowerment)
 
         records[i] = Record(i, E.mean())
         print(f'ep = {i}, empowerment = {records[i].E:.4f}')
@@ -58,10 +62,10 @@ def main():
 
     torch.manual_seed(0)
     np.random.seed(0)
-    env = PendulumEnv()
+    env = BallBoxEnv()
     env.seed(0)
 
-    controller = Controller()
+    controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
     bayes_filter = BayesFilter.init_from_replay_memory(replay_memory)
     bayes_filter.load_params()

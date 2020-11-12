@@ -3,19 +3,20 @@ from gym import spaces
 
 
 class Controller(object):
-    P, I, D = .1, .1, .1
-    desired_mask = np.array([1, 1, 1])
-
-    def __init__(self):
+    def __init__(self, env):
+        action_dim = env.action_space.shape[0]
+        high = np.ones((action_dim, 3)) * .1
         self.action_space = spaces.Box(
-            low=-1.,
-            high=1., shape=(3,),
+            low=-high,
+            high=high, shape=(action_dim, 3),
             dtype=np.float32
         )
 
+        self.P, self.I, self.D = .1, .1, .1
+
     def compute(self, e_terms):
         error, integral, derivative = e_terms
-        pid = -np.dot(self.P * error + self.I * integral + self.D * derivative, self.desired_mask)
+        pid = -np.dot(self.PID[:, 0] * error + self.PID[:, 1] * integral + self.PID[:, 2] * derivative)
         return pid
 
     def update(self, gains):

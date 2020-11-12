@@ -9,6 +9,7 @@ class ReplayMemory(object):
         self.batch_size = args.batch_size
         self.seq_length = args.seq_length
         self.env = env
+        self.controller = controller
         self.val_frac = args.val_frac
         self.state_dim = env.observation_space.shape[0]
         self.action_dim = controller.action_space.shape[0]
@@ -49,6 +50,7 @@ class ReplayMemory(object):
             # Reset environment and simulate with random actions
             x_trial[0] = self.env.reset()
             for t in range(1, self.trial_len):
+                # self.controller.action_space.sample() * x_trial[t - 1]    # here control error instead of state
                 action = self.env.action_space.sample()
                 u_trial[t - 1] = action
                 step_info = self.env.step(action)
