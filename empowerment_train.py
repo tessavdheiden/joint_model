@@ -11,7 +11,7 @@ from empowerment import Empowerment
 from controller import Controller
 from bayes_filter import BayesFilter
 from replay_memory import ReplayMemory
-from empowerment_check import visualize_predictions_angles, visualize_predictions_positions
+from empowerment_check import visualize_predictions_angles, visualize_predictions_positions, visualize_distributions
 
 
 Record = namedtuple('Transition', ['ep', 'E'])
@@ -34,24 +34,22 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
         if i % 10 == 0:
             with torch.no_grad():
                 if isinstance(env, PendulumEnv):
-                    visualize_predictions_angles(empowerment)
+                    visualize_predictions_angles(empowerment, bayes_filter, replay_memory)
                 elif isinstance(env, BallBoxEnv):
-                    visualize_predictions_positions(empowerment)
+                    visualize_distributions(empowerment, bayes_filter, replay_memory)
+
 
         records[i] = Record(i, E.mean())
         print(f'ep = {i}, empowerment = {records[i].E:.4f}')
 
     env.close()
     fig, ax = plt.subplots()
-    # ax.scatter([r.ep for r in records], [r.r for r in records], c='b')
-    # ax.set_ylabel('reward', color='b')
-    ax2 = ax.twinx()
-    ax2.scatter([r.ep for r in records], [r.E for r in records], c='r')
-    ax2.set_ylabel('empowerment', color='r')
-    ax2.grid('on')
+    ax.scatter([r.ep for r in records], [r.E for r in records])
+    ax.set_xlabel('Episode')
+    ax.set_ylabel('$\\mathcal{E}$')
+    ax.grid('on')
     fig.tight_layout()
     plt.savefig('img/reward_vs_empowerment.png')
-    #empowerment.save_params()
 
 
 def main():

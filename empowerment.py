@@ -32,17 +32,20 @@ class Empowerment(nn.Module):
         self.planning = Net(self.z_dim*2, self.action_dim, self.h_dim)
         self.auto_regressive = Net(self.z_dim * 2 + self.action_dim, self.action_dim, self.h_dim)
 
-        self.optimizer = optim.Adam(list(self.source.parameters()) + list(self.planning.parameters())
+        self.optimizer_planning = optim.Adam(list(self.planning.parameters())
                                     + list(self.auto_regressive.parameters()), lr=1e-2)
+        self.optimizer_source = optim.Adam(self.source.parameters(), lr=1e-3)
+        self.planning_steps = 10
 
-    def forward(self, z, n_steps=32):
+        self.it = 0
+
+    def forward(self, z, n_steps=1):
         all_a_ω = []
         all_log_prob_ω = []
         z_ = z
         for t in range(n_steps):
             (μ_ω, σ_ω) = self.source(z_)
             dist_ω = Normal(μ_ω, σ_ω)
-
             a_ω = dist_ω.rsample()
             all_a_ω.append(a_ω.unsqueeze(1))
             all_log_prob_ω.append(dist_ω.log_prob(a_ω).unsqueeze(1))
@@ -64,14 +67,23 @@ class Empowerment(nn.Module):
             all_log_prob_pln.append(dist_pln.log_prob(all_a_ω[:, t]).unsqueeze(1))
             a_pln = dist_pln.rsample()
         all_log_prob_pln = torch.cat(all_log_prob_pln, dim=1)
-        return (all_log_prob_pln - all_log_prob_ω).sum(-1).sum(-1)
+
+        self.it += 1
+        return (all_log_prob_pln - all_log_prob_ω).sum(-1).mean(-1)
 
     def update(self, s):
-        E = self(s)
 
-        self.optimizer.zero_grad()
+        for _ in range(self.planning_steps):
+            self.optimizer_planning.zero_grad()
+            E = self(s)
+            L = -E.mean()
+            L.backward(retain_graph=True)
+            self.optimizer_planning.step()
+
+        self.optimizer_source.zero_grad()
+        E = self(s)
         L = -E.mean()
         L.backward()
-        self.optimizer.step()
+        self.optimizer_source.step()
 
         return E.detach().numpy()

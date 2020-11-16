@@ -84,7 +84,7 @@ def visualize_predictions_position(bayes_filter, replay_memory):
     z = z.detach().numpy()
 
     x = x.reshape(-1, bayes_filter.x_dim)
-    speed = np.sqrt(np.square(x[:, 2]) + np.square(x[:, 3]))
+    speed = np.sqrt(np.square(x[:, 0]) + np.square(x[:, 1]))
     idx = np.argsort(speed)
     z = z.reshape(-1, bayes_filter.z_dim)
     colors = cm.rainbow(np.linspace(0, 1, len(speed)))

@@ -112,7 +112,7 @@ class BayesFilter(nn.Module):
         # return self.p_θ(z_)
         p_μ, p_σ = self.p_θ_μ(z_), self.p_θ_σ(z_)
         dist_p_θ = Normal(p_μ, p_σ)
-        x_ = dist_p_θ.sample()
+        x_ = dist_p_θ.rsample()
         return x_, (p_μ, p_σ)
 
     def _init_output(self, batch_size):
@@ -164,7 +164,7 @@ class BayesFilter(nn.Module):
         C = torch.sum(α_C * c, axis=1)
         (w_μ, w_σ) = torch.zeros((batch_size, self.w_dim)), torch.ones((batch_size, self.w_dim))
         w_dist = Normal(w_μ, w_σ)
-        w = w_dist.sample()
+        w = w_dist.rsample()
         z_ = torch.bmm(A, z.view(-1, self.z_dim, 1)) + torch.bmm(B, u.view(-1, self.u_dim, 1)) + torch.bmm(C, w.view(-1, self.w_dim, 1))
         z_ = z_.squeeze(2)
         z = z_
