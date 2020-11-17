@@ -45,6 +45,7 @@ class BayesFilter(nn.Module):
         self.T = seq_length
         self.x_dim = x_dim
         self.u_dim = u_dim
+        self.u_max = 10
 
         self.z_dim = 3
         self.w_dim = 6
@@ -135,17 +136,10 @@ class BayesFilter(nn.Module):
         z_pred[:, 0] = z
 
         for t in range(1, self.T):
-            (a, b, c) = self._sample_v()
-            (a, b, c) = self._repeat(a, b, c, batch_size)
-            (α_A, α_B, α_C) = self._compute_α(torch.cat((z, u[:, t - 1]), dim=1))
-            A = torch.sum(α_A * a, axis=1)
-            B = torch.sum(α_B * b, axis=1)
-            C = torch.sum(α_C * c, axis=1)
-            w, (w_μ, w_σ) = self._sample_w(z, x[:, t], u[:, t - 1])
-            w_dists[:, t] = torch.stack([w_μ, w_σ], dim=-1)
-            z_ = torch.bmm(A, z.view(-1, self.z_dim, 1)) + torch.bmm(B, u[:, t - 1].view(-1, self.u_dim, 1)) + torch.bmm(C, w.view(-1, self.w_dim, 1))
-            z_ = z_.squeeze(2)
+            z_, (w_μ, w_σ) = self.forward(z=z, u=u[:, t - 1], x=x[:, t])
             x_, (x_μ, x_σ) = self._sample_x_(z_)
+            # Bookkeeping
+            w_dists[:, t] = torch.stack([w_μ, w_σ], dim=-1)
             x_pred[:, t] = x_
             x_dists[:, t] = torch.stack([x_μ, x_σ], dim=-1)
             z_pred[:, t] = z_
@@ -153,8 +147,9 @@ class BayesFilter(nn.Module):
 
         return x_pred, w_dists, z_pred, x_dists
 
-    def forward(self, z, u):
+    def forward(self, z, u, x=[]):
         batch_size = u.shape[0]
+        u = torch.clamp(u, min=-self.u_max, max=self.u_max)
 
         (a, b, c) = self._sample_v()
         (a, b, c) = self._repeat(a, b, c, batch_size)
@@ -162,13 +157,15 @@ class BayesFilter(nn.Module):
         A = torch.sum(α_A * a, axis=1)
         B = torch.sum(α_B * b, axis=1)
         C = torch.sum(α_C * c, axis=1)
-        (w_μ, w_σ) = torch.zeros((batch_size, self.w_dim)), torch.ones((batch_size, self.w_dim))
+        if len(x) == 0:
+            (w_μ, w_σ) = torch.zeros((batch_size, self.w_dim)), torch.ones((batch_size, self.w_dim))
+        else:
+            input = torch.cat((z, x, u), dim=1)
+            (w_μ, w_σ) = self.q_χ_μ(input), self.q_χ_σ(input)
         w_dist = Normal(w_μ, w_σ)
         w = w_dist.rsample()
         z_ = torch.bmm(A, z.view(-1, self.z_dim, 1)) + torch.bmm(B, u.view(-1, self.u_dim, 1)) + torch.bmm(C, w.view(-1, self.w_dim, 1))
-        z_ = z_.squeeze(2)
-        z = z_
-        return z
+        return z_.squeeze(2), (w_μ, w_σ)
 
     @property
     def params(self):
@@ -208,7 +205,7 @@ class BayesFilter(nn.Module):
 
     def _create_optimizer(self):
         # self.optimizer = optim.Adadelta(self.params, lr=1e-1)
-        self.optimizer = optim.Adam(self.params, lr=1e-2)
+        self.optimizer = optim.Adam(self.params, lr=1e-3)
         self.loss_rec = nn.MSELoss()
 
     def update(self, x, u, debug=False):
@@ -216,8 +213,8 @@ class BayesFilter(nn.Module):
         x, u = self.cast(x), self.cast(u)
         x_pred, w_dists, _, x_dists = self.propagate_solution(x, u)
 
-        # with torch.no_grad():
-        #     L_rec = self.loss_rec(x_pred[:, 0:self.T].reshape(-1, self.x_dim), x[:, 0:self.T].reshape(-1, self.x_dim))
+        with torch.no_grad():
+            L_rec = self.loss_rec(x_pred[:, 0:self.T].reshape(-1, self.x_dim), x[:, 0:self.T].reshape(-1, self.x_dim))
         x_μ, x_σ = x_dists[:, :, :, 0], x_dists[:, :, :, 1] + 1e-3
         dists = Normal(x_μ, x_σ)
         L_nll = -dists.log_prob(x[:, :]).sum(-1).mean()
@@ -237,7 +234,7 @@ class BayesFilter(nn.Module):
 
         self.it += 1
         #self._prepare_compute()
-        return L_nll.item(), L_KLD.item()
+        return L_nll.item(), L_KLD.item(), L_rec.item()
 
     def save_params(self, path='param/dvbf_generator_params.pkl'):
         torch.save(self.state_dict(), path)
@@ -247,5 +244,6 @@ class BayesFilter(nn.Module):
 
     @classmethod
     def init_from_replay_memory(cls, replay_memory):
-        instance = cls(seq_length=replay_memory.seq_length, x_dim=replay_memory.state_dim, u_dim=replay_memory.action_dim)
+        instance = cls(seq_length=replay_memory.seq_length, x_dim=replay_memory.state_dim,
+                       u_dim=replay_memory.action_dim)
         return instance

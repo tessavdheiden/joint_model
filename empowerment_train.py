@@ -36,8 +36,8 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
                 if isinstance(env, PendulumEnv):
                     visualize_predictions_angles(empowerment, bayes_filter, replay_memory)
                 elif isinstance(env, BallBoxEnv):
+                    visualize_predictions_positions(empowerment, bayes_filter, replay_memory)
                     visualize_distributions(empowerment, bayes_filter, replay_memory)
-
 
         records[i] = Record(i, E.mean())
         print(f'ep = {i}, empowerment = {records[i].E:.4f}')
@@ -53,7 +53,19 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
 
 
 def main():
-    from args import args
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--val_frac', type=float, default=0.1,
+                        help='fraction of data to be witheld in validation set')
+    parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
+    parser.add_argument('--batch_size', type=int, default=64, help='minibatch size')
+    parser.add_argument('--num_epochs', type=int, default=300, help='number of epochs')
+    parser.add_argument('--n_trials', type=int, default=64,
+                        help='number of data sequences to collect in each episode')
+    parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
+    parser.add_argument('--n_subseq', type=int, default=4,
+                        help='number of subsequences to divide each sequence into')
+    args = parser.parse_args()
 
     if not os.path.exists('param'):
         print('bayes filter not trained')

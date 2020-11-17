@@ -138,8 +138,8 @@ class ReplayMemory(object):
         # Extract next batch
         batch_index = self.batch_permuation_train[
                       self.batchptr_train * self.batch_size:(self.batchptr_train + 1) * self.batch_size]
-        self.batch_dict['states'] = (self.x[batch_index] - self.shift_x) / self.scale_x
-        self.batch_dict['inputs'] = (self.u[batch_index] - self.shift_u) / self.scale_u
+        self.batch_dict['states'] = self.x[batch_index]#(self.x[batch_index] - self.shift_x) / self.scale_x
+        self.batch_dict['inputs'] = self.u[batch_index]#(self.u[batch_index] - self.shift_u) / self.scale_u
 
         # Update pointer
         self.batchptr_train += 1
@@ -154,8 +154,8 @@ class ReplayMemory(object):
     def next_batch_val(self):
         # Extract next validation batch
         batch_index = range(self.batchptr_val * self.batch_size, (self.batchptr_val + 1) * self.batch_size)
-        self.batch_dict['states'] = (self.x_val[batch_index] - self.shift_x) / self.scale_x
-        self.batch_dict['inputs'] = (self.u_val[batch_index] - self.shift_u) / self.scale_u
+        self.batch_dict['states'] = self.x_val[batch_index]#(self.x_val[batch_index] - self.shift_x) / self.scale_x
+        self.batch_dict['inputs'] = self.u_val[batch_index]#(self.u_val[batch_index] - self.shift_u) / self.scale_u
 
         # Update pointer
         self.batchptr_val += 1
