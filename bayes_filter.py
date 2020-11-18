@@ -13,10 +13,10 @@ class Generator(nn.Module):
         self.w_dim = w_dim
         self.T = T
         self.rnn = nn.GRU(x_dim, h_dim, bidirectional=True)
-        self.p_ξ = nn.Sequential(nn.Linear(h_dim * 2, h_dim), nn.ReLU())
+        self.p_ξ = nn.Sequential(nn.Linear(h_dim * 2, h_dim), nn.Softmax(), nn.Linear(h_dim, h_dim))
         self.μ = nn.Linear(h_dim, w_dim)
         self.σ = nn.Sequential(nn.Linear(h_dim, w_dim), nn.Softplus())
-        self.p_λ = nn.Sequential(nn.Linear(w_dim, h_dim), nn.Linear(h_dim, z_dim))
+        self.p_λ = nn.Sequential(nn.Linear(w_dim, h_dim), nn.Softmax(), nn.Linear(h_dim, z_dim))
 
     def forward(self, x):
         # x: tensor of shape (batch_size, seq_length, x_dim)
@@ -36,6 +36,12 @@ class Generator(nn.Module):
     @property
     def networks(self):
         return [self.rnn, self.p_ξ, self.μ, self.σ, self.p_λ]
+
+    def save_params(self, path='param/dvbf_generator_params.pkl'):
+        torch.save(self.state_dict(), path)
+
+    def load_params(self, path='param/dvbf_generator_params.pkl'):
+        self.load_state_dict(torch.load(path))
 
 
 class BayesFilter(nn.Module):
@@ -82,11 +88,11 @@ class BayesFilter(nn.Module):
                                    nn.Softplus())
 
     def _create_decoding_network(self):
-        # self.p_θ = nn.Sequential(nn.Linear(self.z_dim, self.h_dim),
-        #                          nn.Linear(self.h_dim, self.x_dim))
         self.p_θ_μ = nn.Sequential(nn.Linear(self.z_dim, self.h_dim),
+                                   nn.Sigmoid(),
                                    nn.Linear(self.h_dim, self.x_dim))
         self.p_θ_σ = nn.Sequential(nn.Linear(self.z_dim, self.h_dim),
+                                   nn.Sigmoid(),
                                    nn.Linear(self.h_dim, self.x_dim),
                                    nn.Softplus())
 
@@ -169,7 +175,7 @@ class BayesFilter(nn.Module):
 
     @property
     def params(self):
-        return list(self._initial_generator.params) + list(self.f_ψ.parameters()) \
+        return self._initial_generator.params + list(self.f_ψ.parameters()) \
                + list(self.q_χ_μ.parameters()) + list(self.q_χ_σ.parameters()) \
                + list(self.p_θ_μ.parameters()) + list(self.p_θ_σ.parameters()) \
                + [self.q_φ_A] + [self.q_φ_B] + [self.q_φ_C]
@@ -211,7 +217,7 @@ class BayesFilter(nn.Module):
     def update(self, x, u, debug=False):
         #self._prepare_update()
         x, u = self.cast(x), self.cast(u)
-        x_pred, w_dists, _, x_dists = self.propagate_solution(x, u)
+        x_pred, w_dists, z_pred, x_dists = self.propagate_solution(x, u)
 
         with torch.no_grad():
             L_rec = self.loss_rec(x_pred[:, 0:self.T].reshape(-1, self.x_dim), x[:, 0:self.T].reshape(-1, self.x_dim))
@@ -220,6 +226,7 @@ class BayesFilter(nn.Module):
         L_nll = -dists.log_prob(x[:, :]).sum(-1).mean()
 
         if self.it % 10 == 0 and debug:
+            print(f"z[:, 0], z[:, T-1] = {z_pred[0, 0].detach()} {z_pred[0, 1].detach()}")
             print(f"x_pred[:, 0], x[:, 0] = {x_pred[0, 0].detach()} {x[0, 0].detach()}")
             print(f"x_pred[:, self.T-1], x[:, self.T-1] = {x_pred[0, self.T-1].detach()} {x[0, self.T-1].detach()}")
 
@@ -236,11 +243,13 @@ class BayesFilter(nn.Module):
         #self._prepare_compute()
         return L_nll.item(), L_KLD.item(), L_rec.item()
 
-    def save_params(self, path='param/dvbf_generator_params.pkl'):
+    def save_params(self, path='param/dvbf_params.pkl'):
         torch.save(self.state_dict(), path)
+        self._initial_generator.save_params()
 
-    def load_params(self, path='param/dvbf_generator_params.pkl'):
+    def load_params(self, path='param/dvbf_params.pkl'):
         self.load_state_dict(torch.load(path))
+        self._initial_generator.load_params()
 
     @classmethod
     def init_from_replay_memory(cls, replay_memory):

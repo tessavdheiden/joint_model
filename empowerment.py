@@ -49,7 +49,7 @@ class Empowerment(nn.Module):
             dist_ω = Normal(μ_ω, σ_ω)
             a_ω = dist_ω.rsample()
             all_a_ω.append(a_ω.unsqueeze(1))
-            all_log_prob_ω.append(dist_ω.log_prob(a_ω).sum(-1).unsqueeze(1))
+            all_log_prob_ω.append(dist_ω.log_prob(a_ω).unsqueeze(1))
             z_, _ = self.transition(z=z_, u=a_ω)
 
         all_a_ω = torch.cat(all_a_ω, dim=1)
@@ -58,18 +58,19 @@ class Empowerment(nn.Module):
         all_log_prob_pln = []
         (μ_1_pln, σ_1_pln) = self.planning(torch.cat((z, z_), dim=1))
         dist_1_pln = Normal(μ_1_pln, σ_1_pln)
-        all_log_prob_pln.append(dist_1_pln.log_prob(all_a_ω.squeeze(1)).sum(-1).unsqueeze(1))
+        all_log_prob_pln.append(dist_1_pln.log_prob(all_a_ω[:, 0]).unsqueeze(1))
 
-        # a_pln = dist_1_pln.rsample()
-        # for t in range(1, n_steps):
-        #     (μ_pln, σ_pln) = self.auto_regressive(torch.cat((z_1, a_pln, z_N), dim=1))
-        #     dist_pln = Normal(μ_pln, σ_pln)
-        #     all_log_prob_pln.append(dist_pln.log_prob(all_a_ω[:, t]).unsqueeze(1))
-        #     a_pln = dist_pln.rsample()
+        a_pln = dist_1_pln.rsample()
+        for t in range(1, n_steps):
+            (μ_pln, σ_pln) = self.auto_regressive(torch.cat((z, a_pln, z_), dim=1))
+            dist_pln = Normal(μ_pln, σ_pln)
+            all_log_prob_pln.append(dist_pln.log_prob(all_a_ω[:, t]).unsqueeze(1))
+            a_pln = dist_pln.rsample()
+
         all_log_prob_pln = torch.cat(all_log_prob_pln, dim=1)
 
         self.it += 1
-        return (all_log_prob_pln - all_log_prob_ω).mean(-1)
+        return (all_log_prob_pln - all_log_prob_ω).sum(-1).mean(-1)     # sum over action_dim, average over time
 
     def update(self, s):
 

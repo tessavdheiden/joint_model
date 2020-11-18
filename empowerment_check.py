@@ -47,7 +47,8 @@ def visualize_predictions_positions(empowerment, bayes_filter, replay_memory):
 
     X = torch.cat(X, dim=0)
     E = torch.cat(E, dim=0)
-    c = ax.hexbin(X[:, 0], X[:, 1], gridsize=10, C=E[:])
+
+    c = ax.hexbin(X[:, 0], X[:, 1], gridsize=10, C=E[:], mincnt=1)
     fig.colorbar(c, ax=ax)
     ax.set_title('Empowerment Landscape')
     plt.savefig('img/empowerment_landscape.png')

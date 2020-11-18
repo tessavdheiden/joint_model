@@ -62,7 +62,7 @@ def visualize_predictions_angle(bayes_filter, replay_memory):
 
 
 def visualize_predictions_position(bayes_filter, replay_memory):
-    fig = plt.figure(figsize=(10, 10))
+    fig = plt.figure(figsize=(10, 3))
     ax1 = fig.add_subplot(131, projection='3d')
     ax2 = fig.add_subplot(132, projection='3d')
     ax3 = fig.add_subplot(133, projection='3d')
@@ -81,6 +81,11 @@ def visualize_predictions_position(bayes_filter, replay_memory):
     u = torch.cat(u_all, dim=0)
 
     x_, _, z, _ = bayes_filter.propagate_solution(x, u)
+
+    print(f"z[:, 0], z[:, T-1] = {z[0, 0].detach()} {z[0, 1].detach()}")
+    print(f"x_pred[:, 0], x[:, 0] = {x_[0, 0].detach()} {x[0, 0].detach()}")
+    print(f"x_pred[:, self.T-1], x[:, self.T-1] = {x_[0, bayes_filter.T - 1].detach()} {x[0, bayes_filter.T - 1].detach()}")
+
     z = z.detach().numpy()
 
     x = x.reshape(-1, bayes_filter.x_dim)
@@ -96,9 +101,9 @@ def visualize_predictions_position(bayes_filter, replay_memory):
     axes = [ax1, ax2, ax3]
     deg = 0
     for ax in axes:
-        ax.set_xlabel('$\\mu_0$')
-        ax.set_ylabel('$\\mu_1$')
-        ax.set_zlabel('$\\mu_2$')
+        ax.set_xlabel('$z_0$')
+        ax.set_ylabel('$z_1$')
+        ax.set_zlabel('$z_2$')
         ax.axis('auto')
         ax.view_init(30, deg)
         deg += 40
@@ -107,16 +112,16 @@ def visualize_predictions_position(bayes_filter, replay_memory):
 
 
 def main():
-    from args import args
+    from bayes_filter_train import args
     if not os.path.exists('param'):
         print('bayes filter not trained')
 
     torch.manual_seed(0)
     np.random.seed(0)
-    env = PendulumEnv()
+    env = BallBoxEnv()
     env.seed(0)
 
-    controller = Controller()
+    controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
     bayes_filter = BayesFilter.init_from_replay_memory(replay_memory)
     bayes_filter.load_params()
