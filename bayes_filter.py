@@ -13,10 +13,10 @@ class Generator(nn.Module):
         self.w_dim = w_dim
         self.T = T
         self.rnn = nn.GRU(x_dim, h_dim, bidirectional=True)
-        self.p_ξ = nn.Sequential(nn.Linear(h_dim * 2, h_dim), nn.Softmax(), nn.Linear(h_dim, h_dim))
+        self.p_ξ = nn.Sequential(nn.Linear(h_dim * 2, h_dim), nn.Sigmoid(), nn.Linear(h_dim, h_dim))
         self.μ = nn.Linear(h_dim, w_dim)
         self.σ = nn.Sequential(nn.Linear(h_dim, w_dim), nn.Softplus())
-        self.p_λ = nn.Sequential(nn.Linear(w_dim, h_dim), nn.Softmax(), nn.Linear(h_dim, z_dim))
+        self.p_λ = nn.Sequential(nn.Linear(w_dim, h_dim), nn.Sigmoid(), nn.Linear(h_dim, z_dim))
 
     def forward(self, x):
         # x: tensor of shape (batch_size, seq_length, x_dim)
@@ -45,7 +45,7 @@ class Generator(nn.Module):
 
 
 class BayesFilter(nn.Module):
-    def __init__(self, seq_length, x_dim, u_dim):
+    def __init__(self, seq_length, x_dim, u_dim, z_dim):
 
         super(BayesFilter, self).__init__()
         self.T = seq_length
@@ -53,7 +53,7 @@ class BayesFilter(nn.Module):
         self.u_dim = u_dim
         self.u_max = 10
 
-        self.z_dim = 1
+        self.z_dim = z_dim
         self.w_dim = 6
         self.h_dim = 128
         self.M = 16

@@ -18,24 +18,23 @@ Record = namedtuple('Record', ['ep', 'l'])
 
 def visualize_latent_space3D(bayes_filter, replay_memory):
     replay_memory.reset_batchptr_val()
-    x, u = [], []
+    x, z = [], []
     for b in range(replay_memory.n_batches_val):
         batch_dict = replay_memory.next_batch_val()
-        x.append(torch.from_numpy(batch_dict["states"])[:, :bayes_filter.T])
-        u.append(torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1])
+        x_in = torch.from_numpy(batch_dict["states"])[:, :bayes_filter.T]
+        u_in = torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1]
+        x.append(x_in)
+        x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
+        z.append(z_out)
 
     x = torch.cat(x, dim=0)
-    u = torch.cat(u, dim=0)
-
-    x_, _, z, _ = bayes_filter.propagate_solution(x, u)
-    z = z.detach().numpy()
-
-    x = x.reshape(-1, bayes_filter.x_dim)
+    z = torch.cat(z, dim=0)
+    x = x.numpy().reshape(-1, bayes_filter.x_dim)
+    z = z.detach().numpy().reshape(-1, bayes_filter.z_dim)
 
     assert bayes_filter.x_dim == 2
     idx = np.argsort(np.sqrt(np.square(x[:, 0]) + np.square(x[:, 1])))
 
-    z = z.reshape(-1, bayes_filter.z_dim)
     colors = cm.rainbow(np.linspace(0, 1, len(idx)))
 
     fig = plt.figure(figsize=(10, 3))
@@ -63,29 +62,30 @@ def visualize_latent_space3D(bayes_filter, replay_memory):
 
 def visualize_latent_space1D(bayes_filter, replay_memory):
     replay_memory.reset_batchptr_val()
-    x, u = [], []
+    x, z = [], []
     for b in range(replay_memory.n_batches_val):
         batch_dict = replay_memory.next_batch_val()
-        x.append(torch.from_numpy(batch_dict["states"])[:, :bayes_filter.T])
-        u.append(torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1])
+        x_in = torch.from_numpy(batch_dict["states"])[:, :bayes_filter.T]
+        u_in = torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1]
+        x.append(x_in)
+        x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
+        z.append(z_out)
 
     x = torch.cat(x, dim=0)
-    u = torch.cat(u, dim=0)
-
-    x_, _, z, _ = bayes_filter.propagate_solution(x, u)
-    z = z.detach().numpy()
-    x = x.reshape(-1)
-    z = z.reshape(-1, bayes_filter.z_dim)
+    z = torch.cat(z, dim=0)
+    x = x.numpy().reshape(-1)
+    z = z.detach().numpy().reshape(-1)
 
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(3, 3))
 
     assert bayes_filter.z_dim == 1
     idx = np.argsort(x)
+    colors = cm.rainbow(np.linspace(0, 1, len(idx)))
 
-    ax.scatter(x[idx], z[idx], marker='.')
-    ax.set_xlabel('obs x')
-    ax.set_xlabel('obs z')
-
+    ax.scatter(x[idx], z[idx], marker='.', color=colors)
+    ax.set_xlabel('observed x')
+    ax.set_ylabel('latent z')
+    plt.tight_layout()
     plt.savefig(f"img/latent_space.png")
 
 
