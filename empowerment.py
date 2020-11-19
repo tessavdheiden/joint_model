@@ -45,7 +45,7 @@ class Empowerment(nn.Module):
         all_a_ω = []
         all_log_prob_ω = []
         z_ = z
-        z_ = torch.clamp(z_, .1, .9)
+
         for t in range(n_steps):
             (μ_ω, σ_ω) = self.source(z_)
             dist_ω = Normal(μ_ω, σ_ω)

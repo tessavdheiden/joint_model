@@ -53,7 +53,7 @@ class BayesFilter(nn.Module):
         self.u_dim = u_dim
         self.u_max = 10
 
-        self.z_dim = 3
+        self.z_dim = 1
         self.w_dim = 6
         self.h_dim = 128
         self.M = 16

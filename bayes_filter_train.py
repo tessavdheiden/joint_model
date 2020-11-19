@@ -10,7 +10,8 @@ from replay_memory import ReplayMemory
 from controller import Controller
 from env_pendulum import PendulumEnv
 from env_ball_box import BallBoxEnv
-from bayes_filter_check import visualize_predictions_angle, visualize_predictions_position
+from env_sigmoid import SigmoidEnv
+from bayes_filter_check import visualize_latent_space3D, visualize_latent_space1D
 
 Record = namedtuple('Record', ['ep', 'l_r', 'l_nll', 'l_k'])
 
@@ -29,10 +30,10 @@ def train(replay_memory, bayes_filter):
 
         if i % 10 == 0:
             with torch.no_grad():
-                if isinstance(env, PendulumEnv):
-                    visualize_predictions_angle(bayes_filter, replay_memory)
-                elif isinstance(env, BallBoxEnv):
-                    visualize_predictions_position(bayes_filter, replay_memory)
+                if args.env == 2:
+                    visualize_latent_space1D(bayes_filter, replay_memory)
+                else:
+                    visualize_latent_space3D(bayes_filter, replay_memory)
 
         records[i] = Record(i, L_rec, L_NLL, L_KLD)
         print(f'ep = {i},  L_NLL = {L_NLL:.2f} L_rec = {L_rec:.2f} L_KLD = {L_KLD:.4f}')
@@ -60,6 +61,8 @@ parser.add_argument('--n_trials', type=int, default=200,
 parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
 parser.add_argument('--n_subseq', type=int, default=4,
                     help='number of subsequences to divide each sequence into')
+parser.add_argument('--env', type=int, default=2,
+                    help='0=pendulum, 1=ball in box, 2=sigmoid ')
 args = parser.parse_args()
 
 
@@ -72,7 +75,12 @@ if __name__ == '__main__':
 
     torch.manual_seed(0)
     np.random.seed(0)
-    env = BallBoxEnv()
+    if args.env == 0:
+        env = PendulumEnv()
+    elif args.env == 1:
+        env = BallBoxEnv()
+    else:
+        env = SigmoidEnv()
     env.seed(0)
 
     controller = Controller(env)
