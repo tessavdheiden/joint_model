@@ -6,6 +6,66 @@ import matplotlib.cm as cm
 import scipy.stats as stats
 
 
+def visualize_predictions_sigmoid(empowerment, bayes_filter, replay_memory, ep=-1):
+    reps = 100
+    steps = 11
+
+    fig, ax = plt.subplots(ncols=2, nrows=1, figsize=(6, 3))
+    fig.suptitle(f'epoch = {ep}')
+
+    s = torch.Tensor(np.linspace(0, 1, steps)).view(-1, 1, 1).repeat(1, reps, 1).view(-1, 1)
+    value_map = empowerment(s).view(steps, reps, 1).mean(1).detach().numpy()
+    ax[0].imshow(value_map.reshape(-1, 1))
+    ax[0].set_yticks(np.linspace(0, steps, steps))
+    ax[0].set_yticklabels(list(np.around(np.linspace(0, 1, steps), decimals=2)))
+
+    steps = 110
+    s = torch.Tensor(np.linspace(0, 1, steps))
+    value_map = empowerment(s.view(-1, 1, 1).repeat(1, reps, 1).view(-1, 1)).view(steps, reps, 1).mean(1).detach().numpy()
+    ax[1].scatter(s.numpy(), value_map)
+
+    plt.savefig('img/empowerment_landscape.png')
+
+
+def visualize_distributions_sigmoid(empowerment, bayes_filter, replay_memory):
+    replay_memory.reset_batchptr_train()
+
+    X = []
+    for b in range(1):
+        batch_dict = replay_memory.next_batch_train()
+        x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
+
+        x = x.reshape(-1, x.shape[2])
+        X.append(x)
+
+    X = torch.cat(X, dim=0)
+
+    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 3))
+    ax.hist(X[:, 0].numpy(), bins=10)
+    ax.set_xlabel('x at dim=0')
+    plt.tight_layout()
+    plt.savefig('img/dist_x.png')
+
+    (μ_ω, σ_ω) = empowerment.source(X.view(-1, 1))
+    dist_ω = Normal(μ_ω, σ_ω)
+    a_ω = dist_ω.sample()
+
+    X_ = torch.sigmoid(a_ω+X.view(-1, 1))
+
+    X_pln = torch.cat((X, X_), dim=1)
+    (μ_pln, σ_pln) = empowerment.planning(X_pln)
+    dist_pln = Normal(μ_pln.view(-1, 1), σ_pln.view(-1, 1))     # dist_pln dim = [B, z_dim]
+    a_pln = dist_pln.sample()
+
+    fig, ax = plt.subplots(ncols=2, nrows=1, figsize=(6, 3))
+    ax[0].hist(a_pln.view(-1, 1)[:, 0].numpy(), bins=10)
+    ax[0].set_xlabel('$a^q$ at dim=0')
+    ax[1].hist(a_ω.view(-1, 1)[:, 0].numpy(), bins=10)
+    ax[1].set_xlabel('$a^\omega$ at dim=0')
+    plt.tight_layout()
+    plt.savefig('img/dist_source.png')
+
+
 def visualize_predictions_angles(empowerment, bayes_filter):
     x_pxl, y_pxl = 100, 100
 

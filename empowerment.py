@@ -27,16 +27,17 @@ class Empowerment(nn.Module):
         self.h_dim = 128
         self.action_dim = controller.action_space.shape[0]
         self.transition = transition_network
-        self.z_dim = transition_network.z_dim
+        self.z_dim = 1#transition_network.z_dim
 
+        self.env = env
         self.source = Net(self.z_dim, self.action_dim, self.h_dim)
         self.planning = Net(self.z_dim*2, self.action_dim, self.h_dim)
         self.auto_regressive = Net(self.z_dim * 2 + self.action_dim, self.action_dim, self.h_dim)
 
         self.optimizer_planning = optim.Adam(list(self.planning.parameters())
-                                    + list(self.auto_regressive.parameters()), lr=1e-2)
-        self.optimizer_source = optim.Adam(self.source.parameters(), lr=1e-3)
-        self.planning_steps = 10
+                                    + list(self.auto_regressive.parameters()), lr=1e-4)
+        self.optimizer_source = optim.Adam(self.source.parameters(), lr=1e-5)
+        self.planning_steps = 4
 
         self.it = 0
 
@@ -44,13 +45,16 @@ class Empowerment(nn.Module):
         all_a_ω = []
         all_log_prob_ω = []
         z_ = z
+        z_ = torch.clamp(z_, .1, .9)
         for t in range(n_steps):
             (μ_ω, σ_ω) = self.source(z_)
             dist_ω = Normal(μ_ω, σ_ω)
             a_ω = dist_ω.rsample()
             all_a_ω.append(a_ω.unsqueeze(1))
             all_log_prob_ω.append(dist_ω.log_prob(a_ω).unsqueeze(1))
-            z_, _ = self.transition(z=z_, u=a_ω)
+            #z_, _ = self.transition(z=z_, u=a_ω)
+            #a_ω = torch.clamp(a_ω, -3, 3)
+            z_ = torch.clamp(a_ω+z_, .1, .9)
 
         all_a_ω = torch.cat(all_a_ω, dim=1)
         all_log_prob_ω = torch.cat(all_log_prob_ω, dim=1)

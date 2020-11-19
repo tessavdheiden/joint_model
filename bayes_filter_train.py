@@ -8,8 +8,8 @@ import argparse
 from bayes_filter import BayesFilter
 from replay_memory import ReplayMemory
 from controller import Controller
-from pendulum_v2 import PendulumEnv
-from ball_box import BallBoxEnv
+from env_pendulum import PendulumEnv
+from env_ball_box import BallBoxEnv
 from bayes_filter_check import visualize_predictions_angle, visualize_predictions_position
 
 Record = namedtuple('Record', ['ep', 'l_r', 'l_nll', 'l_k'])

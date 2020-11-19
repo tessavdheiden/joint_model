@@ -5,13 +5,14 @@ from collections import namedtuple
 import matplotlib.pyplot as plt
 
 
-from pendulum_v2 import PendulumEnv
-from ball_box import BallBoxEnv
+from env_pendulum import PendulumEnv
+from env_ball_box import BallBoxEnv
+from env_sigmoid import SigmoidEnv
 from empowerment import Empowerment
 from controller import Controller
 from bayes_filter import BayesFilter
 from replay_memory import ReplayMemory
-from empowerment_check import visualize_predictions_angles, visualize_predictions_positions, visualize_distributions
+from empowerment_check import visualize_predictions_angles, visualize_predictions_positions, visualize_distributions, visualize_predictions_sigmoid, visualize_distributions_sigmoid
 
 
 Record = namedtuple('Transition', ['ep', 'E'])
@@ -28,8 +29,9 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
             batch_dict = replay_memory.next_batch_train()
             x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
 
-            _, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
-            E[b, :] = empowerment.update(z_pred.view(-1, z_pred.shape[2]))
+            #_, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
+            #E[b, :] = empowerment.update(z_pred.view(-1, z_pred.shape[2]))
+            E[b, :] = empowerment.update(x.view(-1, 1))
 
         if i % 10 == 0:
             with torch.no_grad():
@@ -38,6 +40,9 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
                 elif isinstance(env, BallBoxEnv):
                     visualize_predictions_positions(empowerment, bayes_filter, replay_memory)
                     #visualize_distributions(empowerment, bayes_filter, replay_memory)
+                elif isinstance(env, SigmoidEnv):
+                    visualize_predictions_sigmoid(empowerment, bayes_filter, replay_memory, ep=i)
+                    visualize_distributions_sigmoid(empowerment, bayes_filter, replay_memory)
 
         records[i] = Record(i, E.mean())
         print(f'ep = {i}, empowerment = {records[i].E:.4f}')
@@ -49,7 +54,7 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
     ax.set_ylabel('$\\mathcal{E}$')
     ax.grid('on')
     fig.tight_layout()
-    plt.savefig('img/reward_vs_empowerment.png')
+    plt.savefig('img/curve_empowerment.png')
 
 
 def main():
@@ -58,9 +63,9 @@ def main():
     parser.add_argument('--val_frac', type=float, default=0.1,
                         help='fraction of data to be witheld in validation set')
     parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
-    parser.add_argument('--batch_size', type=int, default=64, help='minibatch size')
-    parser.add_argument('--num_epochs', type=int, default=300, help='number of epochs')
-    parser.add_argument('--n_trials', type=int, default=200,
+    parser.add_argument('--batch_size', type=int, default=512, help='minibatch size')
+    parser.add_argument('--num_epochs', type=int, default=400, help='number of epochs')
+    parser.add_argument('--n_trials', type=int, default=400,
                         help='number of data sequences to collect in each episode')
     parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
@@ -72,13 +77,13 @@ def main():
 
     torch.manual_seed(0)
     np.random.seed(0)
-    env = BallBoxEnv()
+    env = SigmoidEnv()
     env.seed(0)
 
     controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
     bayes_filter = BayesFilter.init_from_replay_memory(replay_memory)
-    bayes_filter.load_params()
+    #bayes_filter.load_params()
 
     empowerment = Empowerment(env, controller=controller, transition_network=bayes_filter)
 

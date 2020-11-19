@@ -10,8 +10,8 @@ import os
 from bayes_filter import BayesFilter
 from replay_memory import ReplayMemory
 from controller import Controller
-from pendulum_v2 import PendulumEnv
-from ball_box import BallBoxEnv
+from env_pendulum import PendulumEnv
+from env_ball_box import BallBoxEnv
 
 Record = namedtuple('Record', ['ep', 'l'])
 
