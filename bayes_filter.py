@@ -45,14 +45,13 @@ class Generator(nn.Module):
 
 
 class BayesFilter(nn.Module):
-    def __init__(self, seq_length, x_dim, u_dim, z_dim):
+    def __init__(self, seq_length, x_dim, u_dim, z_dim, u_max):
 
         super(BayesFilter, self).__init__()
         self.T = seq_length
         self.x_dim = x_dim
         self.u_dim = u_dim
-        self.u_max = 10
-
+        self.u_max = u_max
         self.z_dim = z_dim
         self.w_dim = 6
         self.h_dim = 128
@@ -211,7 +210,7 @@ class BayesFilter(nn.Module):
 
     def _create_optimizer(self):
         # self.optimizer = optim.Adadelta(self.params, lr=1e-1)
-        self.optimizer = optim.Adam(self.params, lr=1e-3)
+        self.optimizer = optim.Adam(self.params, lr=1e-4)
         self.loss_rec = nn.MSELoss()
 
     def update(self, x, u, debug=False):
@@ -250,9 +249,3 @@ class BayesFilter(nn.Module):
     def load_params(self, path='param/dvbf_params.pkl'):
         self.load_state_dict(torch.load(path))
         self._initial_generator.load_params()
-
-    @classmethod
-    def init_from_replay_memory(cls, replay_memory):
-        instance = cls(seq_length=replay_memory.seq_length, x_dim=replay_memory.state_dim,
-                       u_dim=replay_memory.action_dim)
-        return instance

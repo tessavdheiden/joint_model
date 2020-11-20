@@ -12,7 +12,7 @@ from empowerment import Empowerment
 from controller import Controller
 from bayes_filter import BayesFilter
 from replay_memory import ReplayMemory
-from empowerment_check import visualize_predictions_angles, visualize_predictions_positions, visualize_distributions, visualize_predictions_sigmoid, visualize_distributions_sigmoid
+from empowerment_check import visualize_predictions_angles, visualize_predictions_positions, visualize_distributions, visualize_empowerment_landschape_1D
 
 
 Record = namedtuple('Transition', ['ep', 'E'])
@@ -29,9 +29,8 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
             batch_dict = replay_memory.next_batch_train()
             x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
 
-            #_, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
-            #E[b, :] = empowerment.update(z_pred.view(-1, z_pred.shape[2]))
-            E[b, :] = empowerment.update(x.view(-1, 1))
+            _, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
+            E[b, :] = empowerment.update(z_pred.view(-1, z_pred.shape[2]))
 
         if i % 10 == 0:
             with torch.no_grad():
@@ -40,9 +39,8 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
                 elif isinstance(env, BallBoxEnv):
                     visualize_predictions_positions(empowerment, bayes_filter, replay_memory)
                     #visualize_distributions(empowerment, bayes_filter, replay_memory)
-                elif isinstance(env, SigmoidEnv):
-                    visualize_predictions_sigmoid(empowerment, bayes_filter, replay_memory, ep=i)
-                    visualize_distributions_sigmoid(empowerment, bayes_filter, replay_memory)
+                if empowerment.z_dim == 1:
+                    visualize_empowerment_landschape_1D(empowerment, bayes_filter, replay_memory, ep=i)
 
         records[i] = Record(i, E.mean())
         print(f'ep = {i}, empowerment = {records[i].E:.4f}')
@@ -70,6 +68,8 @@ def main():
     parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
                         help='number of subsequences to divide each sequence into')
+    parser.add_argument('--env', type=int, default=2,
+                        help='0=pendulum, 1=ball in box, 2=sigmoid ')
     args = parser.parse_args()
 
     if not os.path.exists('param'):
@@ -77,13 +77,18 @@ def main():
 
     torch.manual_seed(0)
     np.random.seed(0)
-    env = SigmoidEnv()
+    if args.env == 0:
+        env = PendulumEnv()
+    elif args.env == 1:
+        env = BallBoxEnv()
+    else:
+        env = SigmoidEnv()
     env.seed(0)
 
     controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
     bayes_filter = BayesFilter.init_from_replay_memory(replay_memory)
-    #bayes_filter.load_params()
+    bayes_filter.load_params()
 
     empowerment = Empowerment(env, controller=controller, transition_network=bayes_filter)
 

@@ -23,10 +23,10 @@ class SigmoidEnv(gym.Env):
 
     def __init__(self):
         self.viewer = None
-
+        self.u_max = 1
         self.action_space = spaces.Box(
-            low=-3,
-            high=3, shape=(1,),
+            low=-self.u_max,
+            high=self.u_max, shape=(1,),
             dtype=np.float32
         )
 
@@ -48,7 +48,7 @@ class SigmoidEnv(gym.Env):
         return self.state, None, False, {}
 
     def reset(self):
-        self.state = self.np_random.uniform(low=0, high=1)
+        self.state = self.np_random.uniform(low=0., high=1.)
         self.last_u = None
         return self._get_obs()
 

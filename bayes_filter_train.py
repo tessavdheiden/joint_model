@@ -54,9 +54,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--val_frac', type=float, default=0.1,
                     help='fraction of data to be witheld in validation set')
 parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
-parser.add_argument('--batch_size', type=int, default=64, help='minibatch size')
+parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
 parser.add_argument('--num_epochs', type=int, default=200, help='number of epochs')
-parser.add_argument('--n_trials', type=int, default=200,
+parser.add_argument('--n_trials', type=int, default=500,
                     help='number of data sequences to collect in each episode')
 parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
 parser.add_argument('--n_subseq', type=int, default=4,
@@ -85,6 +85,10 @@ if __name__ == '__main__':
 
     controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
-    bayes_filter = BayesFilter.init_from_replay_memory(replay_memory)
+    bayes_filter = BayesFilter(seq_length=replay_memory.seq_length,
+                               x_dim=replay_memory.state_dim,
+                               u_dim=replay_memory.action_dim,
+                               u_max=env.u_max,
+                               z_dim=1)
 
     train(replay_memory, bayes_filter)
