@@ -8,12 +8,14 @@ import matplotlib.pyplot as plt
 from env_pendulum import PendulumEnv
 from env_ball_box import BallBoxEnv
 from env_sigmoid import SigmoidEnv
+from env_sigmoid2d import Sigmoid2DEnv
 from empowerment import Empowerment
 from controller import Controller
 from bayes_filter import BayesFilter
 from replay_memory import ReplayMemory
-from empowerment_check import visualize_predictions_angles, visualize_predictions_positions, visualize_distributions_1D, visualize_empowerment_landschape_1D
-from bayes_filter_check import visualize_latent_space1D
+from empowerment_check import visualize_predictions_positions, visualize_distributions_1D, \
+    visualize_empowerment_landschape_1D, visualize_empowerment_landschape_2D
+from bayes_filter_check import visualize_latent_space1D, visualize_latent_space2D
 
 
 Record = namedtuple('Transition', ['ep', 'E'])
@@ -44,6 +46,9 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
                     visualize_empowerment_landschape_1D(empowerment, bayes_filter, replay_memory, ep=i)
                     #visualize_distributions_1D(empowerment, bayes_filter, replay_memory, ep=i)
                     visualize_latent_space1D(bayes_filter, replay_memory)
+                elif empowerment.z_dim == 2:
+                    visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory, ep=i)
+                    visualize_latent_space2D(bayes_filter, replay_memory)
 
         records[i] = Record(i, E.mean())
         print(f'ep = {i}, empowerment = {records[i].E:.4f}')
@@ -65,14 +70,14 @@ def main():
                         help='fraction of data to be witheld in validation set')
     parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
-    parser.add_argument('--num_epochs', type=int, default=51, help='number of epochs')
+    parser.add_argument('--num_epochs', type=int, default=201, help='number of epochs')
     parser.add_argument('--n_trials', type=int, default=1000,
                         help='number of data sequences to collect in each episode')
     parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
                         help='number of subsequences to divide each sequence into')
-    parser.add_argument('--env', type=int, default=2,
-                        help='0=pendulum, 1=ball in box, 2=sigmoid ')
+    parser.add_argument('--env', type=int, default=3,
+                        help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d')
     args = parser.parse_args()
 
     if not os.path.exists('param'):
@@ -84,13 +89,15 @@ def main():
         env = PendulumEnv()
     elif args.env == 1:
         env = BallBoxEnv()
-    else:
+    elif args.env == 2:
         env = SigmoidEnv()
+    elif args.env == 3:
+        env = Sigmoid2DEnv()
     env.seed(0)
 
     controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
-    bayes_filter = BayesFilter.init_from_save()
+    bayes_filter = BayesFilter.init_from_replay_memory(replay_memory=replay_memory, z_dim=2, u_max=env.u_max)
 
     empowerment = Empowerment(env, controller=controller, transition_network=bayes_filter)
 

@@ -87,27 +87,30 @@ def visualize_distributions_1D(empowerment, bayes_filter, replay_memory, ep=-1):
     plt.tight_layout()
     plt.savefig('img/dist_source.png')
 
-def visualize_predictions_angles(empowerment, bayes_filter):
-    x_pxl, y_pxl = 100, 100
 
-    s = torch.Tensor([[np.cos(theta), np.sin(theta), thetadot]
-                          for thetadot in np.linspace(-8, 8, y_pxl)
-                          for theta in np.linspace(-np.pi, np.pi, x_pxl)])
+def visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory, ep=-1):
+    replay_memory.reset_batchptr_train()
+    x, z, e = [], [], []
+    for b in range(replay_memory.n_batches_train):
+        batch_dict = replay_memory.next_batch_train()
+        x_in = torch.from_numpy(batch_dict["states"])[:, :bayes_filter.T]
+        u_in = torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1]
+        x.append(x_in)
 
-    v = empowerment(s)
-    value_map = v.view(y_pxl, x_pxl).detach().numpy()
+        x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
+        z_out = z_out.view(-1, bayes_filter.z_dim)
+        e_out = empowerment(z_out)
+        e.append(e_out)
 
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    im = ax.imshow(value_map, cmap=plt.cm.spring, interpolation='bicubic')
-    plt.colorbar(im, shrink=0.5)
-    ax.set_title('Empowerment Landscape')
-    ax.set_xlabel('$\\theta$')
-    ax.set_xticks(np.linspace(0, x_pxl, 5))
-    ax.set_xticklabels(['$-\\pi$', '$-\\pi/2$', '$0$', '$\\pi/2$', '$\\pi$'])
-    ax.set_ylabel('$\\dot{\\theta}$')
-    ax.set_yticks(np.linspace(0, y_pxl, 5))
-    ax.set_yticklabels(['-8', '-4', '0', '4', '8'])
+        z.append(z_out)
+
+    x = torch.cat(x, dim=0).numpy().reshape(-1, 2)
+    e = torch.cat(e, dim=0).numpy().reshape(-1)
+
+    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 3))
+    c = ax.hexbin(x[:, 0], x[:, 1], gridsize=10, C=e[:], mincnt=1)
+    fig.colorbar(c, ax=ax)
+    ax.set_title(f'Empowerment Landscape, ep = {ep}')
     plt.savefig('img/empowerment_landscape.png')
 
 

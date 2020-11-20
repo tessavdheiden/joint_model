@@ -60,6 +60,34 @@ def visualize_latent_space3D(bayes_filter, replay_memory):
 
     plt.savefig(f"img/latent_space.png")
 
+def visualize_latent_space2D(bayes_filter, replay_memory):
+    replay_memory.reset_batchptr_val()
+    x, z = [], []
+    for b in range(replay_memory.n_batches_val):
+        batch_dict = replay_memory.next_batch_val()
+        x_in = torch.from_numpy(batch_dict["states"])[:, :bayes_filter.T]
+        u_in = torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1]
+        x.append(x_in)
+        x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
+        z.append(z_out)
+
+    x = torch.cat(x, dim=0)
+    z = torch.cat(z, dim=0)
+    x = x.numpy().reshape(-1, 2)
+    z = z.detach().numpy().reshape(-1, 2)
+
+    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(3, 3))
+
+    assert bayes_filter.z_dim == 2
+    idx = np.argsort(np.sqrt(np.square(x[:, 0]) + np.square(x[:, 1])))
+    colors = cm.rainbow(np.linspace(0, 1, len(idx)))
+
+    ax.scatter(z[idx, 0], z[idx, 1], marker='.', color=colors)
+    ax.set_xlabel('latent z at dim=0')
+    ax.set_ylabel('latent z at dim=1')
+    plt.tight_layout()
+    plt.savefig(f"img/latent_space.png")
+
 
 def visualize_latent_space1D(bayes_filter, replay_memory):
     replay_memory.reset_batchptr_val()
