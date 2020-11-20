@@ -14,6 +14,7 @@ def visualize_empowerment_landschape_1D(empowerment, bayes_filter, replay_memory
         x_in = torch.from_numpy(batch_dict["states"])[:, :bayes_filter.T]
         u_in = torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1]
         x.append(x_in)
+
         x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
         z_out = z_out.view(-1, bayes_filter.z_dim)
         e_out = empowerment(z_out)
@@ -45,6 +46,46 @@ def visualize_empowerment_landschape_1D(empowerment, bayes_filter, replay_memory
 
     plt.savefig('img/empowerment_landscape.png')
 
+
+def visualize_distributions_1D(empowerment, bayes_filter, replay_memory, ep=-1):
+    replay_memory.reset_batchptr_train()
+    x, z, e = [], [], []
+    for b in range(replay_memory.n_batches_train):
+        batch_dict = replay_memory.next_batch_train()
+        x_in = torch.from_numpy(batch_dict["states"])[:, :bayes_filter.T]
+        u_in = torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1]
+        x.append(x_in)
+        x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
+        z_out = z_out.view(-1, bayes_filter.z_dim)
+        e_out = empowerment(z_out)
+        e.append(e_out)
+
+        z.append(z_out)
+
+    x = torch.cat(x, dim=0).numpy().reshape(-1)
+    e = torch.cat(e, dim=0).numpy().reshape(-1)
+    z = torch.cat(z, dim=0).view(-1, 1)
+
+    fig, ax = plt.subplots(ncols=6, nrows=1, figsize=(16, 3))
+    fig.suptitle(f'epoch = {ep}')
+    (μ_ω, σ_ω) = empowerment.source(z)
+    dist_ω = Normal(μ_ω, σ_ω)
+    a_ω = dist_ω.sample()
+
+    z_, _ = empowerment.transition(z=z, u=a_ω)
+    z_pln = torch.cat((z, z_), dim=1)
+    (μ_pln, σ_pln) = empowerment.planning(z_pln)
+    dist_pln = Normal(μ_pln, σ_pln)
+    a_pln = dist_pln.sample()
+
+    ax[0].hist(a_pln.view(-1, 1)[:, 0].numpy(), bins=10)
+    ax[0].set_xlabel('$a^q$ at dim=0')
+
+    ax[2].hist(a_ω.view(-1, 1)[:, 0].numpy(), bins=10)
+    ax[2].set_xlabel('$a^\omega$ at dim=0')
+
+    plt.tight_layout()
+    plt.savefig('img/dist_source.png')
 
 def visualize_predictions_angles(empowerment, bayes_filter):
     x_pxl, y_pxl = 100, 100

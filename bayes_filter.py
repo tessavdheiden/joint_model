@@ -37,12 +37,6 @@ class Generator(nn.Module):
     def networks(self):
         return [self.rnn, self.p_ξ, self.μ, self.σ, self.p_λ]
 
-    def save_params(self, path='param/dvbf_generator_params.pkl'):
-        torch.save(self.state_dict(), path)
-
-    def load_params(self, path='param/dvbf_generator_params.pkl'):
-        self.load_state_dict(torch.load(path))
-
 
 class BayesFilter(nn.Module):
     def __init__(self, seq_length, x_dim, u_dim, z_dim, u_max):
@@ -242,10 +236,26 @@ class BayesFilter(nn.Module):
         #self._prepare_compute()
         return L_nll.item(), L_KLD.item(), L_rec.item()
 
-    def save_params(self, path='param/dvbf_params.pkl'):
-        torch.save(self.state_dict(), path)
-        self._initial_generator.save_params()
+    def save_params(self, path='param/dvbf.pkl'):
+        save_dict = {'init_dict': self.init_dict,
+                    'params': self.state_dict()}
+        torch.save(save_dict, path)
 
-    def load_params(self, path='param/dvbf_params.pkl'):
-        self.load_state_dict(torch.load(path))
-        self._initial_generator.load_params()
+    @classmethod
+    def init_from_save(cls, path='param/dvbf.pkl'):
+        save_dict = torch.load(path)
+        instance = cls(**save_dict['init_dict'])
+        instance.init_dict = save_dict['init_dict']
+        instance.load_state_dict(save_dict['params'])
+        return instance
+
+    @classmethod
+    def init_from_replay_memory(cls, replay_memory, z_dim, u_max):
+        init_dict = {'seq_length': replay_memory.seq_length,
+                     'x_dim': replay_memory.state_dim,
+                     'u_dim': replay_memory.action_dim,
+                     'z_dim': z_dim,
+                     'u_max': u_max}
+        instance = cls(**init_dict)
+        instance.init_dict = init_dict
+        return instance

@@ -30,7 +30,12 @@ def train(replay_memory, bayes_filter):
 
         if i % 10 == 0:
             with torch.no_grad():
+                bayes_filter.save_params()
                 if args.env == 2:
+                    #dvbf = BayesFilter.init_from_save()
+                    #print(list(dvbf._initial_generator.parameters())[0][0])
+                    #print(list(bayes_filter._initial_generator.parameters())[0][0])
+                    #visualize_latent_space1D(dvbf, replay_memory)
                     visualize_latent_space1D(bayes_filter, replay_memory)
                 else:
                     visualize_latent_space3D(bayes_filter, replay_memory)
@@ -47,7 +52,7 @@ def train(replay_memory, bayes_filter):
     ax[2].set_ylabel('KL')
     fig.tight_layout()
     plt.savefig('img/loss.png')
-    bayes_filter.save_params()
+
 
 
 parser = argparse.ArgumentParser()
@@ -55,8 +60,8 @@ parser.add_argument('--val_frac', type=float, default=0.1,
                     help='fraction of data to be witheld in validation set')
 parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
 parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
-parser.add_argument('--num_epochs', type=int, default=200, help='number of epochs')
-parser.add_argument('--n_trials', type=int, default=500,
+parser.add_argument('--num_epochs', type=int, default=50, help='number of epochs')
+parser.add_argument('--n_trials', type=int, default=1000,
                     help='number of data sequences to collect in each episode')
 parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
 parser.add_argument('--n_subseq', type=int, default=4,
@@ -85,10 +90,6 @@ if __name__ == '__main__':
 
     controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
-    bayes_filter = BayesFilter(seq_length=replay_memory.seq_length,
-                               x_dim=replay_memory.state_dim,
-                               u_dim=replay_memory.action_dim,
-                               u_max=env.u_max,
-                               z_dim=1)
+    bayes_filter = BayesFilter.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=1)
 
     train(replay_memory, bayes_filter)

@@ -12,6 +12,7 @@ from replay_memory import ReplayMemory
 from controller import Controller
 from env_pendulum import PendulumEnv
 from env_ball_box import BallBoxEnv
+from env_sigmoid import SigmoidEnv
 
 Record = namedtuple('Record', ['ep', 'l'])
 
@@ -96,18 +97,26 @@ def main():
 
     torch.manual_seed(0)
     np.random.seed(0)
-    env = BallBoxEnv()
+    if args.env == 0:
+        env = PendulumEnv()
+    elif args.env == 1:
+        env = BallBoxEnv()
+    else:
+        env = SigmoidEnv()
     env.seed(0)
 
     controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
-    bayes_filter = BayesFilter.init_from_replay_memory(replay_memory)
+    bayes_filter = BayesFilter(seq_length=replay_memory.seq_length,
+                               x_dim=replay_memory.state_dim,
+                               u_dim=replay_memory.action_dim,
+                               u_max=env.u_max,
+                               z_dim=1)
     bayes_filter.load_params()
 
-    if isinstance(env, PendulumEnv):
-        visualize_predictions_angle(bayes_filter, replay_memory)
-    else:
-        visualize_predictions_position(bayes_filter, replay_memory)
+    if isinstance(env, SigmoidEnv):
+        visualize_latent_space1D(bayes_filter, replay_memory)
+
 
 if __name__ == '__main__':
     main()
