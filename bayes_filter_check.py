@@ -13,6 +13,7 @@ from controller import Controller
 from env_pendulum import PendulumEnv
 from env_ball_box import BallBoxEnv
 from env_sigmoid import SigmoidEnv
+from env_sigmoid2d import Sigmoid2DEnv
 
 Record = namedtuple('Record', ['ep', 'l'])
 
@@ -85,6 +86,7 @@ def visualize_latent_space2D(bayes_filter, replay_memory):
     ax.scatter(z[idx, 0], z[idx, 1], marker='.', color=colors)
     ax.set_xlabel('latent z at dim=0')
     ax.set_ylabel('latent z at dim=1')
+    ax.axis('equal')
     plt.tight_layout()
     plt.savefig(f"img/latent_space.png")
 
@@ -114,6 +116,7 @@ def visualize_latent_space1D(bayes_filter, replay_memory):
     ax.scatter(x[idx], z[idx], marker='.', color=colors)
     ax.set_xlabel('observed x')
     ax.set_ylabel('latent z')
+
     plt.tight_layout()
     plt.savefig(f"img/latent_space.png")
 
@@ -129,21 +132,20 @@ def main():
         env = PendulumEnv()
     elif args.env == 1:
         env = BallBoxEnv()
-    else:
+    elif args.env == 2:
         env = SigmoidEnv()
+    elif args.env == 3:
+        env = Sigmoid2DEnv()
     env.seed(0)
 
     controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
-    bayes_filter = BayesFilter(seq_length=replay_memory.seq_length,
-                               x_dim=replay_memory.state_dim,
-                               u_dim=replay_memory.action_dim,
-                               u_max=env.u_max,
-                               z_dim=1)
-    bayes_filter.load_params()
+    bayes_filter = BayesFilter.init_from_save()
 
-    if isinstance(env, SigmoidEnv):
+    if bayes_filter.z_dim == 1:
         visualize_latent_space1D(bayes_filter, replay_memory)
+    elif bayes_filter.z_dim == 2:
+        visualize_latent_space2D(bayes_filter, replay_memory)
 
 
 if __name__ == '__main__':

@@ -31,7 +31,7 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
         for b in range(replay_memory.n_batches_train):
             batch_dict = replay_memory.next_batch_train()
             x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
-            _, _, _ = bayes_filter.update(x, u)
+            #_, _, _ = bayes_filter.update(x, u)
             _, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
             E[b, :] = empowerment.update(z_pred.view(-1, z_pred.shape[2]))
 
@@ -97,7 +97,7 @@ def main():
 
     controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
-    bayes_filter = BayesFilter.init_from_replay_memory(replay_memory=replay_memory, z_dim=2, u_max=env.u_max)
+    bayes_filter = BayesFilter.init_from_save()
 
     empowerment = Empowerment(env, controller=controller, transition_network=bayes_filter)
 

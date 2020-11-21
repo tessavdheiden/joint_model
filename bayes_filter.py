@@ -13,10 +13,10 @@ class Generator(nn.Module):
         self.w_dim = w_dim
         self.T = T
         self.rnn = nn.GRU(x_dim, h_dim, bidirectional=True)
-        self.p_ξ = nn.Sequential(nn.Linear(h_dim * 2, h_dim), nn.Sigmoid(), nn.Linear(h_dim, h_dim))
-        self.μ = nn.Linear(h_dim, w_dim)
-        self.σ = nn.Sequential(nn.Linear(h_dim, w_dim), nn.Softplus())
-        self.p_λ = nn.Sequential(nn.Linear(w_dim, h_dim), nn.Sigmoid(), nn.Linear(h_dim, z_dim))
+        self.p_ξ = nn.Sequential(nn.Linear(h_dim * 2, h_dim), nn.Sigmoid(), nn.BatchNorm1d(h_dim), nn.Linear(h_dim, h_dim))
+        self.μ = nn.Sequential(nn.Linear(h_dim, h_dim), nn.Sigmoid(), nn.BatchNorm1d(h_dim), nn.Linear(h_dim, w_dim))
+        self.σ = nn.Sequential(nn.Linear(h_dim, h_dim), nn.Sigmoid(), nn.BatchNorm1d(h_dim), nn.Linear(h_dim, w_dim), nn.Softplus())
+        self.p_λ = nn.Sequential(nn.Linear(w_dim, h_dim), nn.Sigmoid(), nn.BatchNorm1d(h_dim), nn.Linear(h_dim, z_dim))
 
     def forward(self, x):
         # x: tensor of shape (batch_size, seq_length, x_dim)
@@ -176,7 +176,7 @@ class BayesFilter(nn.Module):
 
     @property
     def networks(self):
-        return self._initial_generator.networks + [self.f_ψ, self.q_χ_μ, self.q_χ_σ, self.p_θ]
+        return self._initial_generator.networks + [self.f_ψ, self.q_χ_μ, self.q_χ_σ, self.p_θ_μ, self.p_θ_σ]
 
     def _prepare_update(self):
         for network in self.networks:
@@ -238,7 +238,10 @@ class BayesFilter(nn.Module):
 
     def save_params(self, path='param/dvbf.pkl'):
         save_dict = {'init_dict': self.init_dict,
-                    'params': self.state_dict()}
+                    'networks': [network.state_dict() for network in self.networks],
+                    'q_φ_A': self.q_φ_A,
+                    'q_φ_B': self.q_φ_B,
+                    'q_φ_C': self.q_φ_C}
         torch.save(save_dict, path)
 
     @classmethod
@@ -246,7 +249,12 @@ class BayesFilter(nn.Module):
         save_dict = torch.load(path)
         instance = cls(**save_dict['init_dict'])
         instance.init_dict = save_dict['init_dict']
-        instance.load_state_dict(save_dict['params'])
+        for network, params in zip(instance.networks, save_dict['networks']):
+            network.load_state_dict(params)
+        instance.q_φ_A = save_dict['q_φ_A']
+        instance.q_φ_B = save_dict['q_φ_B']
+        instance.q_φ_C = save_dict['q_φ_C']
+
         return instance
 
     @classmethod

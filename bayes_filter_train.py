@@ -33,13 +33,15 @@ def train(replay_memory, bayes_filter):
             with torch.no_grad():
                 bayes_filter.save_params()
                 if bayes_filter.z_dim == 1:
-                    #dvbf = BayesFilter.init_from_save()
+                    dvbf = BayesFilter.init_from_save()
                     #print(list(dvbf._initial_generator.parameters())[0][0])
                     #print(list(bayes_filter._initial_generator.parameters())[0][0])
                     #visualize_latent_space1D(dvbf, replay_memory)
                     visualize_latent_space1D(bayes_filter, replay_memory)
-                else:
+                elif bayes_filter.z_dim == 2:
                     visualize_latent_space2D(bayes_filter, replay_memory)
+                elif bayes_filter.z_dim == 3:
+                    visualize_latent_space3D(bayes_filter, replay_memory)
 
         records[i] = Record(i, L_rec, L_NLL, L_KLD)
         print(f'ep = {i},  L_NLL = {L_NLL:.2f} L_rec = {L_rec:.2f} L_KLD = {L_KLD:.4f}')
@@ -61,7 +63,7 @@ parser.add_argument('--val_frac', type=float, default=0.1,
                     help='fraction of data to be witheld in validation set')
 parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
 parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
-parser.add_argument('--num_epochs', type=int, default=500, help='number of epochs')
+parser.add_argument('--num_epochs', type=int, default=101, help='number of epochs')
 parser.add_argument('--n_trials', type=int, default=1000,
                     help='number of data sequences to collect in each episode')
 parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
