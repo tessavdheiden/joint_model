@@ -98,7 +98,7 @@ def visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory
         x.append(x_in)
 
         x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
-        z_out = z_out.view(-1, bayes_filter.z_dim)
+        z_out = z_out.reshape(-1, bayes_filter.z_dim)
         e_out = empowerment(z_out)
         e.append(e_out)
 
@@ -114,31 +114,7 @@ def visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory
     plt.savefig('img/empowerment_landscape.png')
 
 
-def visualize_predictions_positions(empowerment, bayes_filter, replay_memory):
-    replay_memory.reset_batchptr_train()
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-
-    X, E = [], []
-    for b in range(replay_memory.n_batches_train):
-        batch_dict = replay_memory.next_batch_train()
-        x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
-        _, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
-
-        E.append(empowerment(z_pred.view(-1, z_pred.shape[2])).detach())
-        x = x.reshape(-1, x.shape[2])
-        X.append(x)
-
-    X = torch.cat(X, dim=0)
-    E = torch.cat(E, dim=0)
-
-    c = ax.hexbin(X[:, 0], X[:, 1], gridsize=10, C=E[:], mincnt=1)
-    fig.colorbar(c, ax=ax)
-    ax.set_title('Empowerment Landscape')
-    plt.savefig('img/empowerment_landscape.png')
-
-
-def visualize_distributions(empowerment, bayes_filter, replay_memory):
+def visualize_distributions_2D(empowerment, bayes_filter, replay_memory):
     def plot_dist(x, bins, μ_ω, μ_σ, ax, bin_num, title, color='b'):
         inds = np.digitize(x, bins)
         μ_ω = μ_ω[inds == bin_num].mean()
@@ -209,15 +185,15 @@ def visualize_distributions(empowerment, bayes_filter, replay_memory):
     ax[0, 0].set_xlabel('z at dim=0')
     ax[0, 1].hist(Z[:, 1].numpy(), bins=10)
     ax[0, 1].set_xlabel('z at dim=1')
-    ax[0, 2].hist(Z[:, 2].numpy(), bins=10)
-    ax[0, 2].set_xlabel('z at dim=2')
+    # ax[0, 2].hist(Z[:, 2].numpy(), bins=10)
+    # ax[0, 2].set_xlabel('z at dim=2')
 
     ax[1, 0].hist(Z_hat[:, 0].numpy(), bins=10)
     ax[1, 0].set_xlabel('$\hat{z}$ at dim=0')
     ax[1, 1].hist(Z_hat[:, 1].numpy(), bins=10)
     ax[1, 1].set_xlabel('$\hat{z}$ at dim=1')
-    ax[1, 2].hist(Z_hat[:, 2].numpy(), bins=10)
-    ax[1, 2].set_xlabel('$\hat{z}$ at dim=2')
+    # ax[1, 2].hist(Z_hat[:, 2].numpy(), bins=10)
+    # ax[1, 2].set_xlabel('$\hat{z}$ at dim=2')
 
     plt.savefig('img/dist_z.png')
     # μ_ω_x, μ_ω_y = μ_ω[:, 0], μ_ω[:, 1]

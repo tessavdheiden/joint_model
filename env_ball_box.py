@@ -11,23 +11,18 @@ class BallBoxEnv(gym.Env):
     }
 
     def __init__(self):
-        self.m = .1
-        self.w = .25
-        self.dt = .05
         self.viewer = None
-        self.damping = 0.25
-        self.max_speed = 10
-        self.max_dim = 1
-
+        self.u_max = 1
+        self.dt = .1
         self.action_space = spaces.Box(
-            low=-self.max_speed,
-            high=self.max_speed, shape=(2,),
+            low=-self.u_max,
+            high=self.u_max, shape=(2,),
             dtype=np.float32
         )
-        high = np.array([self.max_dim, self.max_dim], dtype=np.float32)
+
         self.observation_space = spaces.Box(
-            low=-high,
-            high=high,
+            low=0,
+            high=1, shape=(2,),
             dtype=np.float32
         )
 
@@ -36,16 +31,14 @@ class BallBoxEnv(gym.Env):
         return [seed]
 
     def step(self, u):
-        x, y = self.state
-        p = np.array([x, y])
+        x = self.state
 
-        p += u * self.dt
-        self.state = np.clip(p, -self.max_dim + self.w / 2, self.max_dim - self.w / 2)
+        x += u * self.dt
+        self.state = np.clip(x, 0., 1.)
         return self.state, None, False, {}
 
     def reset(self):
-        high = np.array([self.max_dim - self.w / 2, self.max_dim - self.w / 2])
-        self.state = self.np_random.uniform(low=-high, high=high)
+        self.state = self.np_random.uniform(low=0., high=1., size=(2, ))
         self.last_u = None
         return self._get_obs()
 
@@ -61,8 +54,8 @@ class BallBoxEnv(gym.Env):
         if self.viewer is None:
             from gym.envs.classic_control import rendering
             self.viewer = rendering.Viewer(500, 500)
-            self.viewer.set_bounds(-self.max_dim, self.max_dim, -self.max_dim, self.max_dim)
-            ball = rendering.make_circle(self.w)
+            self.viewer.set_bounds(0, 1, 0, 1)
+            ball = rendering.make_circle(.01)
             ball.set_color(0, 0, 0)
             self.ball_transform = rendering.Transform()
             ball.add_attr(self.ball_transform)

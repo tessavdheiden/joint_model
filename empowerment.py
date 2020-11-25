@@ -53,8 +53,8 @@ class Empowerment(nn.Module):
             all_a_ω.append(a_ω.unsqueeze(1))
             all_log_prob_ω.append(dist_ω.log_prob(a_ω).unsqueeze(1))
             z_, _ = self.transition(z=z_, u=a_ω)
-            #a_ω = torch.clamp(a_ω, -3, 3)
-            #z_ = torch.sigmoid(a_ω+z_)
+            # a_ω = torch.clamp(a_ω, -1, 1)
+            # z_ = torch.clamp(a_ω+z_, 0, 1)
 
         all_a_ω = torch.cat(all_a_ω, dim=1)
         all_log_prob_ω = torch.cat(all_log_prob_ω, dim=1)

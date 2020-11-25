@@ -52,6 +52,7 @@ class ReplayMemory(object):
             for t in range(1, self.trial_len):
                 # self.controller.action_space.sample() * x_trial[t - 1]    # here control error instead of state
                 action = self.env.action_space.sample()
+                #self.env.render()
                 u_trial[t - 1] = action
                 step_info = self.env.step(action)
                 x_trial[t] = np.squeeze(step_info[0])

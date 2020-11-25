@@ -2,17 +2,10 @@ import gym
 from gym import spaces
 from gym.utils import seeding
 import numpy as np
-from os import path
 
 
 def sigmoid(X):
    return 1/(1+np.exp(-X))
-
-
-import gym
-from gym import spaces
-from gym.utils import seeding
-import numpy as np
 
 
 class SigmoidEnv(gym.Env):
@@ -74,6 +67,6 @@ class SigmoidEnv(gym.Env):
             # self.img.add_attr(self.imgtrans)
 
         # self.viewer.add_onetime(self.img)
-        self.ball_transform.set_translation(self.state[0], 0)
+        self.ball_transform.set_translation(self.state, 0)
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')

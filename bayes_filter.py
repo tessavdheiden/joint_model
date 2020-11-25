@@ -19,7 +19,7 @@ class Generator(nn.Module):
         self.p_λ = nn.Sequential(nn.Linear(w_dim, h_dim), nn.Sigmoid(), nn.BatchNorm1d(h_dim), nn.Linear(h_dim, z_dim))
 
     def forward(self, x):
-        # x: tensor of shape (batch_size, seq_length, x_dim)
+        # (batch_size, seq_length, x_dim) = x.shape
         bi_out, _ = self.rnn(x[:, 0:self.T])                 # bi_out: tensor of shape (batch_size, seq_length, h_dim*2)
         h = self.p_ξ(bi_out[:, 0])
         (μ, σ) = self.μ(h), self.σ(h)
@@ -57,8 +57,9 @@ class BayesFilter(nn.Module):
         self._create_decoding_network()
         self._create_optimizer()
         self.cast = lambda x: x
-
         self.it = 0
+        self.Ta = 1e6
+        self.c = max(1, 0.01 + self.it / self.Ta)
 
     # Initialize potential transition matrices
     def _create_transition_matrices(self, std=1e-4):
@@ -178,43 +179,23 @@ class BayesFilter(nn.Module):
     def networks(self):
         return self._initial_generator.networks + [self.f_ψ, self.q_χ_μ, self.q_χ_σ, self.p_θ_μ, self.p_θ_σ]
 
-    def _prepare_update(self):
-        for network in self.networks:
-            network.train()
-            network.to('cuda:0')
-
-        self.q_φ_A = self.q_φ_A.cuda()
-        self.q_φ_B = self.q_φ_B.cuda()
-        self.q_φ_C = self.q_φ_C.cuda()
-
-        self.loss_rec = self.loss_rec.cuda()
-        self.cast = lambda x: x.cuda()
-
-    def _prepare_compute(self):
-        for network in self.networks:
-            network.eval()
-            network.to('cpu')
-
-        self.q_φ_A = self.q_φ_A.cpu()
-        self.q_φ_B = self.q_φ_B.cpu()
-        self.q_φ_C = self.q_φ_C.cpu()
-
-        self.loss_rec = self.loss_rec.cpu()
-        self.cast = lambda x: x.cpu()
-
     def _create_optimizer(self):
         # self.optimizer = optim.Adadelta(self.params, lr=1e-1)
         self.optimizer = optim.Adam(self.params, lr=1e-4)
         self.loss_rec = nn.MSELoss()
 
     def update(self, x, u, debug=False):
-        #self._prepare_update()
+        self.it += 1
+
+        if self.it % 250 == 0:
+            self.c = max(1, 0.01 + self.it / self.Ta)
+
         x, u = self.cast(x), self.cast(u)
         x_pred, w_dists, z_pred, x_dists = self.propagate_solution(x, u)
 
         with torch.no_grad():
             L_rec = self.loss_rec(x_pred[:, 0:self.T].reshape(-1, self.x_dim), x[:, 0:self.T].reshape(-1, self.x_dim))
-        x_μ, x_σ = x_dists[:, :, :, 0], x_dists[:, :, :, 1] + 1e-3
+        x_μ, x_σ = x_dists[:, :, :, 0], x_dists[:, :, :, 1]
         dists = Normal(x_μ, x_σ)
         L_nll = -dists.log_prob(x[:, :]).sum(-1).mean()
 
@@ -223,17 +204,15 @@ class BayesFilter(nn.Module):
             print(f"x_pred[:, 0], x[:, 0] = {x_pred[0, 0].detach()} {x[0, 0].detach()}")
             print(f"x_pred[:, self.T-1], x[:, self.T-1] = {x_pred[0, self.T-1].detach()} {x[0, self.T-1].detach()}")
 
-        μ, σ = w_dists[:, :, :, 0], w_dists[:, :, :, 1] + 1e-3
+        μ, σ = self.cast(w_dists[:, :, :, 0]), self.cast(w_dists[:, :, :, 1])
         p = Normal(μ, σ)
         q = Normal(torch.zeros_like(μ), torch.ones_like(σ))
+
         L_KLD = torch.distributions.kl.kl_divergence(p, q).sum(-1).mean()
         self.optimizer.zero_grad()
-        L = L_nll + L_KLD
+        L = L_nll + self.c * L_KLD
         L.backward()
         self.optimizer.step()
-
-        self.it += 1
-        #self._prepare_compute()
         return L_nll.item(), L_KLD.item(), L_rec.item()
 
     def save_params(self, path='param/dvbf.pkl'):

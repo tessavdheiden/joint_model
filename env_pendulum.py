@@ -13,7 +13,7 @@ class PendulumEnv(gym.Env):
 
     def __init__(self, g=10.0):
         self.max_speed = 8
-        self.max_torque = 1.
+        self.u_max = 1.
         self.dt = .05
         self.g = g
         self.m = .1
@@ -22,8 +22,8 @@ class PendulumEnv(gym.Env):
 
         high = np.array([1., 1., self.max_speed], dtype=np.float32)
         self.action_space = spaces.Box(
-            low=-self.max_torque,
-            high=self.max_torque, shape=(1,),
+            low=-self.u_max,
+            high=self.u_max, shape=(1,),
             dtype=np.float32
         )
         self.observation_space = spaces.Box(
@@ -44,7 +44,7 @@ class PendulumEnv(gym.Env):
         l = self.l
         dt = self.dt
 
-        u = np.clip(u, -self.max_torque, self.max_torque)[0]
+        u = np.clip(u, -self.u_max, self.u_max)[0]
         self.last_u = u  # for rendering
         costs = angle_normalize(th) ** 2 + .1 * thdot ** 2 + .001 * (u ** 2)
 

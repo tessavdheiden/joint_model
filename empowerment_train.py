@@ -13,8 +13,8 @@ from empowerment import Empowerment
 from controller import Controller
 from bayes_filter import BayesFilter
 from replay_memory import ReplayMemory
-from empowerment_check import visualize_predictions_positions, visualize_distributions_1D, \
-    visualize_empowerment_landschape_1D, visualize_empowerment_landschape_2D
+from empowerment_check import visualize_distributions_1D, \
+    visualize_empowerment_landschape_1D, visualize_empowerment_landschape_2D, visualize_distributions_2D
 from bayes_filter_check import visualize_latent_space1D, visualize_latent_space2D
 
 
@@ -27,28 +27,23 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
     for i in range(args.num_epochs):
         replay_memory.reset_batchptr_train()
 
-        E = np.zeros((replay_memory.n_batches_train, args.batch_size * args.seq_length))
+        E = np.zeros((replay_memory.n_batches_train, args.batch_size * (args.seq_length - 1)))
         for b in range(replay_memory.n_batches_train):
             batch_dict = replay_memory.next_batch_train()
             x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
-            #_, _, _ = bayes_filter.update(x, u)
             _, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
-            E[b, :] = empowerment.update(z_pred.view(-1, z_pred.shape[2]))
+            E[b, :] = empowerment.update(z_pred[:, 1:].reshape(-1, z_pred.shape[2]))
 
         if i % 10 == 0:
             with torch.no_grad():
-                if isinstance(env, PendulumEnv):
-                    visualize_predictions_angles(empowerment, bayes_filter, replay_memory)
-                elif isinstance(env, BallBoxEnv):
-                    visualize_predictions_positions(empowerment, bayes_filter, replay_memory)
-                    #visualize_distributions(empowerment, bayes_filter, replay_memory)
-                if empowerment.z_dim == 1:
+                if replay_memory.state_dim == 1:
                     visualize_empowerment_landschape_1D(empowerment, bayes_filter, replay_memory, ep=i)
                     #visualize_distributions_1D(empowerment, bayes_filter, replay_memory, ep=i)
                     visualize_latent_space1D(bayes_filter, replay_memory)
-                elif empowerment.z_dim == 2:
+                elif replay_memory.state_dim == 2:
                     visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory, ep=i)
-                    visualize_latent_space2D(bayes_filter, replay_memory)
+                    #visualize_latent_space2D(bayes_filter, replay_memory)
+                    #visualize_distributions_2D(empowerment, bayes_filter, replay_memory)
 
         records[i] = Record(i, E.mean())
         print(f'ep = {i}, empowerment = {records[i].E:.4f}')
@@ -70,7 +65,7 @@ def main():
                         help='fraction of data to be witheld in validation set')
     parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
-    parser.add_argument('--num_epochs', type=int, default=201, help='number of epochs')
+    parser.add_argument('--num_epochs', type=int, default=101, help='number of epochs')
     parser.add_argument('--n_trials', type=int, default=1000,
                         help='number of data sequences to collect in each episode')
     parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
