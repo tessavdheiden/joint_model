@@ -57,9 +57,9 @@ class BayesFilter(nn.Module):
         self._create_decoding_network()
         self._create_optimizer()
         self.cast = lambda x: x
-        self.it = 0
+        self.it = 1
         self.Ta = 1e6
-        self.c = max(1, 0.01 + self.it / self.Ta)
+        self.c = .01
 
     # Initialize potential transition matrices
     def _create_transition_matrices(self, std=1e-4):
@@ -69,24 +69,24 @@ class BayesFilter(nn.Module):
 
     def _create_transition_network(self):
         self.f_ψ = nn.Sequential(nn.Linear(self.z_dim + self.u_dim, self.h_dim),
-                                   nn.Sigmoid(),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
                                    nn.Linear(self.h_dim, self.M))
 
     def _create_recognition_network(self):
         self.q_χ_μ = nn.Sequential(nn.Linear(self.z_dim + self.u_dim + self.x_dim, self.h_dim),
-                                   nn.Sigmoid(),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
                                    nn.Linear(self.h_dim, self.w_dim))
         self.q_χ_σ = nn.Sequential(nn.Linear(self.z_dim + self.u_dim + self.x_dim, self.h_dim),
-                                   nn.Sigmoid(),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
                                    nn.Linear(self.h_dim, self.w_dim),
                                    nn.Softplus())
 
     def _create_decoding_network(self):
         self.p_θ_μ = nn.Sequential(nn.Linear(self.z_dim, self.h_dim),
-                                   nn.Sigmoid(),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
                                    nn.Linear(self.h_dim, self.x_dim))
         self.p_θ_σ = nn.Sequential(nn.Linear(self.z_dim, self.h_dim),
-                                   nn.Sigmoid(),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
                                    nn.Linear(self.h_dim, self.x_dim),
                                    nn.Softplus())
 
@@ -181,16 +181,14 @@ class BayesFilter(nn.Module):
 
     def _create_optimizer(self):
         # self.optimizer = optim.Adadelta(self.params, lr=1e-1)
-        self.optimizer = optim.Adam(self.params, lr=1e-4)
+        self.optimizer = optim.Adam(self.params, lr=1e-3)
         self.loss_rec = nn.MSELoss()
 
-    def update(self, x, u, debug=False):
-        self.it += 1
+    def update(self, x, u, gradient_updates, debug=False):
+        if gradient_updates % 250 == 0:
+            self.c = min(1, 0.01 + gradient_updates / self.Ta)
 
-        if self.it % 250 == 0:
-            self.c = max(1, 0.01 + self.it / self.Ta)
-
-        x, u = self.cast(x), self.cast(u)
+        x, u = self.cast(x[:, 0:self.T]), self.cast(u[:, 0:self.T])
         x_pred, w_dists, z_pred, x_dists = self.propagate_solution(x, u)
 
         with torch.no_grad():
@@ -213,6 +211,8 @@ class BayesFilter(nn.Module):
         L = L_nll + self.c * L_KLD
         L.backward()
         self.optimizer.step()
+
+        self.it += 1
         return L_nll.item(), L_KLD.item(), L_rec.item()
 
     def save_params(self, path='param/dvbf.pkl'):
@@ -238,7 +238,7 @@ class BayesFilter(nn.Module):
 
     @classmethod
     def init_from_replay_memory(cls, replay_memory, z_dim, u_max):
-        init_dict = {'seq_length': replay_memory.seq_length,
+        init_dict = {'seq_length': replay_memory.seq_length // 2,
                      'x_dim': replay_memory.state_dim,
                      'u_dim': replay_memory.action_dim,
                      'z_dim': z_dim,

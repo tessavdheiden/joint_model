@@ -104,25 +104,25 @@ def visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory
 
         z.append(z_out)
 
-    x = torch.cat(x, dim=0).numpy().reshape(-1, 2)
+    x = torch.cat(x, dim=0).numpy().reshape(-1, bayes_filter.x_dim)
     e = torch.cat(e, dim=0).numpy().reshape(-1)
-
+    if bayes_filter.x_dim > 2:
+        x1 = np.arctan2(x[:, 1], x[:, 0])
+        x2 = x[:, 2]
+    else:
+        x1 = x[:, 0]
+        x2 = x[:, 1]
     fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 3))
-    c = ax.hexbin(x[:, 0], x[:, 1], gridsize=10, C=e[:], mincnt=1)
+    c = ax.hexbin(x1, x2, gridsize=10, C=e[:], mincnt=1)
     fig.colorbar(c, ax=ax)
     ax.set_title(f'Empowerment Landscape, ep = {ep}')
+    ax.set_xlabel('x at dim=0')
+    ax.set_xlabel('x at dim=1')
     plt.savefig('img/empowerment_landscape.png')
+    plt.close()
 
 
 def visualize_distributions_2D(empowerment, bayes_filter, replay_memory):
-    def plot_dist(x, bins, μ_ω, μ_σ, ax, bin_num, title, color='b'):
-        inds = np.digitize(x, bins)
-        μ_ω = μ_ω[inds == bin_num].mean()
-        μ_σ = μ_σ[inds == bin_num].mean()
-        x = np.linspace(μ_ω - 3 * μ_σ, μ_ω + 3 * μ_σ, 100)
-        ax.plot(x, stats.norm.pdf(x, μ_ω, μ_σ), c=color)
-        ax.set_title(title)
-
     replay_memory.reset_batchptr_train()
 
     X, Z, U = [], [], []
@@ -171,44 +171,8 @@ def visualize_distributions_2D(empowerment, bayes_filter, replay_memory):
     ax[5].set_xlabel('a data at dim=1')
     plt.tight_layout()
     plt.savefig('img/dist_source.png')
+    plt.close()
 
-    fig, ax = plt.subplots(ncols=2, nrows=1, figsize=(6, 3))
-    ax[0].hist(X[:, 0].numpy(), bins=10)
-    ax[0].set_xlabel('x at dim=0')
-    ax[1].hist(X[:, 1].numpy(), bins=10)
-    ax[1].set_xlabel('x at dim=1')
-    plt.tight_layout()
-    plt.savefig('img/dist_x.png')
-
-    fig, ax = plt.subplots(ncols=3, nrows=2, figsize=(20, 12))
-    ax[0, 0].hist(Z[:, 0].numpy(), bins=10)
-    ax[0, 0].set_xlabel('z at dim=0')
-    ax[0, 1].hist(Z[:, 1].numpy(), bins=10)
-    ax[0, 1].set_xlabel('z at dim=1')
-    # ax[0, 2].hist(Z[:, 2].numpy(), bins=10)
-    # ax[0, 2].set_xlabel('z at dim=2')
-
-    ax[1, 0].hist(Z_hat[:, 0].numpy(), bins=10)
-    ax[1, 0].set_xlabel('$\hat{z}$ at dim=0')
-    ax[1, 1].hist(Z_hat[:, 1].numpy(), bins=10)
-    ax[1, 1].set_xlabel('$\hat{z}$ at dim=1')
-    # ax[1, 2].hist(Z_hat[:, 2].numpy(), bins=10)
-    # ax[1, 2].set_xlabel('$\hat{z}$ at dim=2')
-
-    plt.savefig('img/dist_z.png')
-    # μ_ω_x, μ_ω_y = μ_ω[:, 0], μ_ω[:, 1]
-    # μ_σ_x, μ_σ_y = σ_ω[:, 0], σ_ω[:, 1]
-    #
-    # bins = np.array([-1., -.5, .5, 1.])
-    # x, y = X[:, 0], X[:, 1]
-    #
-    # fig, ax = plt.subplots(ncols=3, nrows=3, figsize=(10, 10))
-    # plot_dist(x, bins, μ_ω_x, μ_σ_x, ax[0, 0], bin_num=1, title="-1. < x < -.5")
-    # plot_dist(x, bins, μ_ω_x, μ_σ_x, ax[0, 1], bin_num=2, title="-.5 < x <  .5")
-    # plot_dist(x, bins, μ_ω_x, μ_σ_x, ax[0, 2], bin_num=3, title=".5 < x <  1.")
-    # plot_dist(y, bins, μ_ω_y, μ_σ_y, ax[0, 1], bin_num=1, title="-1. < x < -.5, -1. < y < -.5", color='r')
-    # plot_dist(y, bins, μ_ω_y, μ_σ_y, ax[1, 1], bin_num=2, title="-.5 < y <  .5", color='r')
-    # plot_dist(y, bins, μ_ω_y, μ_σ_y, ax[2, 1], bin_num=3, title=".5 < y <  1.", color='r')
 
 
 

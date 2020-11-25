@@ -12,6 +12,7 @@ from env_sigmoid2d import Sigmoid2DEnv
 from empowerment import Empowerment
 from controller import Controller
 from bayes_filter import BayesFilter
+from bayes_filter_fully_connected import BayesFilterFullyConnected
 from replay_memory import ReplayMemory
 from empowerment_check import visualize_distributions_1D, \
     visualize_empowerment_landschape_1D, visualize_empowerment_landschape_2D, visualize_distributions_2D
@@ -27,12 +28,12 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
     for i in range(args.num_epochs):
         replay_memory.reset_batchptr_train()
 
-        E = np.zeros((replay_memory.n_batches_train, args.batch_size * (args.seq_length - 1)))
+        E = np.zeros((replay_memory.n_batches_train, args.batch_size * args.seq_length))
         for b in range(replay_memory.n_batches_train):
             batch_dict = replay_memory.next_batch_train()
             x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
             _, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
-            E[b, :] = empowerment.update(z_pred[:, 1:].reshape(-1, z_pred.shape[2]))
+            E[b, :] = empowerment.update(z_pred.reshape(-1, z_pred.shape[2]))
 
         if i % 10 == 0:
             with torch.no_grad():
@@ -40,9 +41,8 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
                     visualize_empowerment_landschape_1D(empowerment, bayes_filter, replay_memory, ep=i)
                     #visualize_distributions_1D(empowerment, bayes_filter, replay_memory, ep=i)
                     visualize_latent_space1D(bayes_filter, replay_memory)
-                elif replay_memory.state_dim == 2:
+                elif replay_memory.state_dim > 1:
                     visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory, ep=i)
-                    #visualize_latent_space2D(bayes_filter, replay_memory)
                     #visualize_distributions_2D(empowerment, bayes_filter, replay_memory)
 
         records[i] = Record(i, E.mean())
@@ -71,7 +71,7 @@ def main():
     parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
                         help='number of subsequences to divide each sequence into')
-    parser.add_argument('--env', type=int, default=3,
+    parser.add_argument('--env', type=int, default=0,
                         help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d')
     args = parser.parse_args()
 
@@ -92,7 +92,7 @@ def main():
 
     controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
-    bayes_filter = BayesFilter.init_from_save()
+    bayes_filter = BayesFilterFullyConnected.init_from_save()
 
     empowerment = Empowerment(env, controller=controller, transition_network=bayes_filter)
 

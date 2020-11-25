@@ -6,6 +6,7 @@ import os
 import argparse
 
 from bayes_filter import BayesFilter
+from bayes_filter_fully_connected import BayesFilterFullyConnected
 from replay_memory import ReplayMemory
 from controller import Controller
 from env_pendulum import PendulumEnv
@@ -21,14 +22,16 @@ Record = namedtuple('Record', ['ep', 'l_r', 'l_nll', 'l_k'])
 # Plot predictions against true time evolution
 def train(replay_memory, bayes_filter):
     records = [None] * args.num_epochs
-
+    gu = 0
     for i in range(args.num_epochs):
         replay_memory.reset_batchptr_train()
 
         for b in range(replay_memory.n_batches_train):
             batch_dict = replay_memory.next_batch_train()
             x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
-            L_NLL, L_KLD, L_rec = bayes_filter.update(x, u)
+            gu += b * args.batch_size
+
+            L_NLL, L_KLD, L_rec = bayes_filter.update(x, u, gu)
 
         if i % 10 == 0:
             with torch.no_grad():
@@ -64,7 +67,7 @@ parser.add_argument('--val_frac', type=float, default=0.1,
                     help='fraction of data to be witheld in validation set')
 parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
 parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
-parser.add_argument('--num_epochs', type=int, default=101, help='number of epochs')
+parser.add_argument('--num_epochs', type=int, default=1001, help='number of epochs')
 parser.add_argument('--n_trials', type=int, default=1000,
                     help='number of data sequences to collect in each episode')
 parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')

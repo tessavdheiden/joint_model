@@ -1,35 +1,40 @@
 import math
 import numpy as np
+import pdb
+import random
 import progressbar
 
 
 # Class to load and preprocess data
-class ReplayMemory(object):
-    def __init__(self, args, env, controller):
+class ReplayMemory():
+    def __init__(self, args, controller, env):
         self.batch_size = args.batch_size
-        self.seq_length = args.seq_length
-        self.env = env
-        self.controller = controller
-        self.val_frac = args.val_frac
-        self.state_dim = env.observation_space.shape[0]
-        self.action_dim = controller.action_space.shape[0]
+        self.seq_length = 2 * args.seq_length
+        # self.shift_x = shift
+        # self.scale_x = scale
+        # self.shift_u = shift_u
+        # self.scale_u = scale_u
         self.n_trials = args.n_trials
         self.n_subseq = args.n_subseq
+        self.val_frac = args.val_frac
         self.trial_len = args.trial_len
+        self.env = env
+        self.state_dim = env.observation_space.shape[0]
+        self.action_dim = controller.action_space.shape[0]
 
         print('validation fraction: ', args.val_frac)
 
         print("generating data...")
-        self._generate_data()
-        self._create_inputs_targets()
+        self._generate_data(args)
+        self._create_inputs_targets(args)
 
         print('creating splits...')
-        self._create_split()
+        self._create_split(args)
 
         print('shifting/scaling data...')
-        self._shift_scale()
+        self._shift_scale(args)
 
-    def _generate_data(self):
+    def _generate_data(self, args):
         # Initialize array to hold states and actions
         x = np.zeros((self.n_trials, self.n_subseq, self.seq_length, self.state_dim), dtype=np.float32)
         u = np.zeros((self.n_trials, self.n_subseq, self.seq_length - 1, self.action_dim), dtype=np.float32)
@@ -50,9 +55,7 @@ class ReplayMemory(object):
             # Reset environment and simulate with random actions
             x_trial[0] = self.env.reset()
             for t in range(1, self.trial_len):
-                # self.controller.action_space.sample() * x_trial[t - 1]    # here control error instead of state
                 action = self.env.action_space.sample()
-                #self.env.render()
                 u_trial[t - 1] = action
                 step_info = self.env.step(action)
                 x_trial[t] = np.squeeze(step_info[0])
@@ -81,7 +84,7 @@ class ReplayMemory(object):
         self.x = self.x[:len_x]
         self.u = self.u[:len_x]
 
-    def _create_inputs_targets(self):
+    def _create_inputs_targets(self, args):
         # Create batch_dict
         self.batch_dict = {}
 
@@ -99,7 +102,7 @@ class ReplayMemory(object):
         self.u = self.u[p]
 
     # Separate data into train/validation sets
-    def _create_split(self):
+    def _create_split(self, args):
         # Compute number of batches
         self.n_batches = len(self.x) // self.batch_size
         self.n_batches_val = int(math.floor(self.val_frac * self.n_batches))
@@ -119,9 +122,9 @@ class ReplayMemory(object):
         self.reset_batchptr_val()
 
     # Shift and scale data to be zero-mean, unit variance
-    def _shift_scale(self):
+    def _shift_scale(self, args):
         # Find means and std if not initialized to anything
-        #if np.sum(self.scale_x) == 0.0:
+        # if np.sum(self.scale_x) == 0.0:
         self.shift_x = np.mean(self.x[:self.n_batches_train], axis=(0, 1))
         self.scale_x = np.std(self.x[:self.n_batches_train], axis=(0, 1))
         self.shift_u = np.mean(self.u[:self.n_batches_train], axis=(0, 1))
