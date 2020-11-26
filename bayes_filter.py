@@ -58,8 +58,8 @@ class BayesFilter(nn.Module):
         self._create_optimizer()
         self.cast = lambda x: x
         self.it = 1
-        self.Ta = 1e6
-        self.c = .01
+        self.Ta = 1e7
+        self.c = .001
 
     # Initialize potential transition matrices
     def _create_transition_matrices(self, std=1e-4):
@@ -185,8 +185,8 @@ class BayesFilter(nn.Module):
         self.loss_rec = nn.MSELoss()
 
     def update(self, x, u, gradient_updates, debug=False):
-        if gradient_updates % 250 == 0:
-            self.c = min(1, 0.01 + gradient_updates / self.Ta)
+        if gradient_updates % 2500 == 0:
+           self.c = min(1, 0.01 + gradient_updates / self.Ta)
 
         x, u = self.cast(x[:, 0:self.T]), self.cast(u[:, 0:self.T])
         x_pred, w_dists, z_pred, x_dists = self.propagate_solution(x, u)

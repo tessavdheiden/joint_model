@@ -9,10 +9,15 @@ class Net(nn.Module):
 
     def __init__(self, input_dim, out_dim, h_dim):
         super(Net, self).__init__()
-        self.fc = nn.Sequential(nn.Linear(input_dim, h_dim), nn.Sigmoid(),
-                                nn.Linear(h_dim, h_dim), nn.Sigmoid())
-        self.mu_head = nn.Linear(h_dim, out_dim)
-        self.sigma_head = nn.Linear(h_dim, out_dim)
+        self.fc = nn.Sequential(nn.Linear(input_dim, h_dim),
+                                nn.Sigmoid(), nn.BatchNorm1d(h_dim),
+                                nn.Linear(h_dim, h_dim))
+        self.mu_head = nn.Sequential(nn.Linear(h_dim, h_dim),
+                                nn.Sigmoid(), nn.BatchNorm1d(h_dim),
+                                nn.Linear(h_dim, out_dim))
+        self.sigma_head = nn.Sequential(nn.Linear(h_dim, h_dim),
+                                nn.Sigmoid(), nn.BatchNorm1d(h_dim),
+                                nn.Linear(h_dim, out_dim), nn.Softplus())
 
     def forward(self, x):
         x = self.fc(x)
