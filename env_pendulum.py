@@ -12,6 +12,7 @@ class PendulumEnv(gym.Env):
     }
 
     def __init__(self, g=10.0):
+        self.name = 'Pendulum'
         self.max_speed = 8
         self.u_max = 1.
         self.dt = .05

@@ -11,6 +11,7 @@ class BallBoxEnv(gym.Env):
     }
 
     def __init__(self):
+        self.name = 'BallInBox'
         self.viewer = None
         self.u_max = 1
         self.dt = .1

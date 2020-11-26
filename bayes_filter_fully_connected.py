@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Normal
-import torch.nn.functional as F
-from torch.autograd import Variable
+from bayes_filter import Generator, BayesFilter
 
 
 class BayesFilterFullyConnected(nn.Module):
@@ -15,116 +14,162 @@ class BayesFilterFullyConnected(nn.Module):
         self.u_dim = u_dim
         self.u_max = u_max
         self.z_dim = z_dim
-        self.w_dim = 6
+        self.w_dim = z_dim
         self.h_dim = 128
 
-        self.num_layers = 1
-        self.encoder = nn.LSTM(self.h_dim, self.h_dim, self.num_layers)
-        self._create_recognition_network()
-        self._create_transition_network()
+        self._initial_generator = Generator(z_dim=self.z_dim, h_dim=self.h_dim, x_dim=self.x_dim, w_dim=self.w_dim, T=self.T)
+        self._create_observation_network()
         self._create_decoding_network()
         self._create_optimizer()
+        self.cast = lambda x: x
         self.it = 0
-        self.beta = 50
+        self.c = 1
 
-    def _create_recognition_network(self):
-        self.q_χ = nn.Sequential(nn.Linear(self.x_dim, self.h_dim),
-                                   nn.Sigmoid(),
+    def _create_observation_network(self):
+        self.q_trans = nn.Sequential(nn.Linear(self.z_dim + self.u_dim, self.h_dim),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
+                                   nn.Linear(self.h_dim, self.h_dim))
+        self.q_trans_μ = nn.Sequential(nn.Linear(self.h_dim, self.h_dim),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
                                    nn.Linear(self.h_dim, self.z_dim))
-
-    def _create_transition_network(self):
-        self.f_ψ_μ = nn.Sequential(nn.Linear(self.z_dim + self.u_dim, self.h_dim),
-                                   nn.Sigmoid(),
+        self.q_trans_σ = nn.Sequential(nn.Linear(self.h_dim, self.h_dim),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
+                                   nn.Linear(self.h_dim, self.z_dim),
+                                   nn.Softplus())
+        self.q_trans_σ_bar = nn.Sequential(nn.Linear(self.h_dim, self.h_dim),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
+                                   nn.Linear(self.h_dim, self.z_dim),
+                                   nn.Softplus())
+        self.q_meas = nn.Sequential(nn.Linear(self.x_dim, self.h_dim),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
+                                   nn.Linear(self.h_dim, self.h_dim))
+        self.q_meas_μ = nn.Sequential(nn.Linear(self.h_dim, self.h_dim),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
                                    nn.Linear(self.h_dim, self.z_dim))
-        self.f_ψ_σ = nn.Sequential(nn.Linear(self.z_dim + self.u_dim, self.h_dim),
-                                   nn.Sigmoid(),
-                                   nn.Linear(self.h_dim, self.z_dim))
+        self.q_meas_σ = nn.Sequential(nn.Linear(self.h_dim, self.h_dim),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
+                                   nn.Linear(self.h_dim, self.z_dim),
+                                   nn.Softplus())
 
     def _create_decoding_network(self):
-        self.p_θ_μ = nn.Sequential(nn.Linear(self.z_dim + self.u_dim, self.h_dim),
-                                   nn.Sigmoid(),
+        self.p_θ_μ = nn.Sequential(nn.Linear(self.z_dim, self.h_dim),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
                                    nn.Linear(self.h_dim, self.x_dim))
-        self.p_θ_σ = nn.Sequential(nn.Linear(self.z_dim + self.u_dim, self.h_dim),
-                                   nn.Sigmoid(),
-                                   nn.Linear(self.h_dim, self.x_dim))
-
-    def init_hidden(self, batch_size):
-        return (
-            torch.zeros(self.num_layers, batch_size, self.h_dim),
-            torch.zeros(self.num_layers, batch_size, self.h_dim)
-        )
+        self.p_θ_σ = nn.Sequential(nn.Linear(self.z_dim, self.h_dim),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
+                                   nn.Linear(self.h_dim, self.x_dim),
+                                   nn.Softplus())
 
     def _init_output(self, batch_size):
-        x_pred = torch.zeros(batch_size, self.T, self.x_dim)
-        x_dists = torch.zeros(batch_size, self.T, self.x_dim, 2)
-        z_dists = torch.zeros(batch_size, self.T, self.z_dim, 2)
-        z_pred = torch.zeros(batch_size, self.T, self.z_dim)
-        return x_pred, z_pred, x_dists, z_dists
+        x_pred = self.cast(torch.zeros(batch_size, self.T, self.x_dim))
+        x_dists = self.cast(torch.zeros(batch_size, self.T, self.x_dim, 2))
+        w_dists = self.cast(torch.zeros(batch_size, self.T, self.w_dim, 2))
+        z_pred = self.cast(torch.zeros(batch_size, self.T, self.z_dim))
+        return x_pred, w_dists, z_pred, x_dists
+
+    def _sample_x_(self, z_):
+        # return self.p_θ(z_)
+        p_μ, p_σ = self.p_θ_μ(z_), self.p_θ_σ(z_)
+        dist_p_θ = Normal(p_μ, p_σ)
+        x_ = dist_p_θ.rsample()
+        return x_, (p_μ, p_σ)
 
     def propagate_solution(self, x, u):
-        batch_size, seq_length, x_dim = x.shape
-        _, _, u_dim = u.shape
+        batch_size = x.shape[0]
 
-        x_pred, z_pred, x_dists, z_dists = self._init_output(batch_size)
-        z_ = self.q_χ(x[:, 0])
-        z_pred[:, 0] = z_
+        z, (w1_μ, w1_σ) = self._initial_generator(x)
+
+        x_pred, w_dists, z_pred, x_dists = self._init_output(batch_size)
+        x1, (x1_μ, x1_σ) = self._sample_x_(z)
+        x_pred[:, 0] = x1
+        x_dists[:, 0] = torch.stack([x1_μ, x1_σ], dim=-1)
+        w_dists[:, 0] = torch.stack([w1_μ, w1_σ], dim=-1)
+        z_pred[:, 0] = z
+
         for t in range(1, self.T):
-            #z_ = self.q_χ(x[:, t])
-
-            z_, (μ_trans, σ_trans) = self.forward(u=u[:, t - 1], z=z_)
-            x_μ, x_σ = self.p_θ_μ(torch.cat((z_, u[:, t - 1]), dim=1)), self.p_θ_σ(torch.cat((z_, u[:, t - 1]), dim=1))
-            dist_x = Normal(x_μ, x_σ)
-            x_ = dist_x.rsample()
-            x_dists[:, t - 1] = torch.stack([x_μ, x_σ], dim=-1)
-            z_dists[:, t - 1] = torch.stack([μ_trans, σ_trans], dim=-1)
+            z_, (w_μ, w_σ) = self.forward(z=z, u=u[:, t - 1], x=x[:, t])
+            x_, (x_μ, x_σ) = self._sample_x_(z_)
+            # Bookkeeping
+            w_dists[:, t] = torch.stack([w_μ, w_σ], dim=-1)
             x_pred[:, t] = x_
+            x_dists[:, t] = torch.stack([x_μ, x_σ], dim=-1)
             z_pred[:, t] = z_
+            z = z_
 
-        return x_pred, z_dists, z_pred, x_dists
+        return x_pred, w_dists, z_pred, x_dists
 
-    def forward(self, z, u):
+    def forward(self, z, u, x=None):
         u = torch.clamp(u, min=-self.u_max, max=self.u_max)
 
-        μ_trans, σ_trans = self.f_ψ_μ(torch.cat((z, u), dim=1)), self.f_ψ_σ(torch.cat((z, u), dim=1))
-        dist = Normal(μ_trans, σ_trans)
-        z_ = dist.rsample()
-        return z_, (μ_trans, σ_trans)
+        input = torch.cat((z, u), dim=1)
+        trans = self.q_trans(input)
+        trans_μ, trans_σ, trans_σ_bar = self.q_trans_μ(trans), self.q_trans_σ(trans), self.q_trans_σ_bar(trans)
+        if x is None:  # empowerment
+            w_μ = trans_μ
+            w_σ = trans_σ
+            q_μ = trans_μ
+        else:
+            meas = self.q_meas(x)
+            meas_μ, meas_σ = self.q_meas_μ(meas), self.q_meas_σ(meas)
+            q_μ = (trans_μ * meas_σ ** 2 + meas_μ * trans_σ_bar ** 2) / (meas_σ ** 2 + trans_σ_bar ** 2)
+            q_σ = torch.sqrt((meas_σ ** 2 * trans_σ_bar ** 2) / (meas_σ ** 2 + trans_σ_bar ** 2))
+            w_μ = (q_μ - trans_μ) / trans_σ
+            w_σ = torch.sqrt((q_σ ** 2) / (trans_σ ** 2))
+
+        z_dist = Normal(q_μ, trans_σ)
+        z_ = z_dist.rsample()
+        return z_, (w_μ, w_σ)
 
     @property
     def params(self):
-        return list(self.f_ψ_μ.parameters()) + list(self.f_ψ_σ.parameters()) \
-               + list(self.q_χ.parameters()) \
+        return self._initial_generator.params + list(self.q_meas.parameters()) \
+               + list(self.q_meas_μ.parameters()) + list(self.q_meas_σ.parameters()) \
+               + list(self.q_trans.parameters()) + list(self.q_trans_μ.parameters()) \
+               + list(self.q_trans_σ.parameters()) + list(self.q_trans_σ_bar.parameters()) \
                + list(self.p_θ_μ.parameters()) + list(self.p_θ_σ.parameters())
 
     @property
     def networks(self):
-        return [self.f_ψ_μ, self.f_ψ_σ, self.q_χ, self.p_θ_μ, self.p_θ_σ]
+        return self._initial_generator.networks + [self.q_meas, self.q_meas_μ, self.q_meas_σ,
+               self.q_trans, self.q_trans_μ, self.q_trans_σ, self.q_trans_σ_bar, self.p_θ_μ, self.p_θ_σ]
 
     def _create_optimizer(self):
-        #self.optimizer = optim.Adadelta(self.params, lr=1e-3)
+        # self.optimizer = optim.Adadelta(self.params, lr=1e-1)
         self.optimizer = optim.Adam(self.params, lr=1e-3)
         self.loss_rec = nn.MSELoss()
-
-    def update(self, x, u, debug=False):
-        self.it += 1
-
-        x_pred, z_dists, z_pred, x_dists = self.propagate_solution(x, u)
-        x_μ, x_σ = x_dists[:, :, :, 0], x_dists[:, :, :, 1]
-        dists = Normal(x_μ, x_σ)
-        L_nll = -dists.log_prob(x[:, 0:self.T]).sum(-1).mean()
-
-        L_rec = self.loss_rec(x_pred[:, 0:self.T].reshape(-1, self.x_dim), x[:, 0:self.T].reshape(-1, self.x_dim))
-
-        self.optimizer.zero_grad()
-        L = L_nll
-        L.backward()
-        self.optimizer.step()
-        return L_rec.item(), L_rec.item(), L_rec.item()
 
     def save_params(self, path='param/dvbf_connected.pkl'):
         save_dict = {'init_dict': self.init_dict,
                     'networks': [network.state_dict() for network in self.networks]}
         torch.save(save_dict, path)
+
+    def update(self, x, u, gradient_updates, debug=False):
+        x, u = self.cast(x[:, 0:self.T]), self.cast(u[:, 0:self.T])
+        x_pred, w_dists, z_pred, x_dists = self.propagate_solution(x, u)
+
+        with torch.no_grad():
+            L_rec = self.loss_rec(x_pred[:, 0:self.T].reshape(-1, self.x_dim), x[:, 0:self.T].reshape(-1, self.x_dim))
+        x_μ, x_σ = x_dists[:, :, :, 0], x_dists[:, :, :, 1]
+        dists = Normal(x_μ, x_σ)
+        L_nll = -dists.log_prob(x[:, :]).sum(-1).mean()
+
+        if self.it % 10 == 0 and debug:
+            print(f"z[:, 0], z[:, T-1] = {z_pred[0, 0].detach()} {z_pred[0, 1].detach()}")
+            print(f"x_pred[:, 0], x[:, 0] = {x_pred[0, 0].detach()} {x[0, 0].detach()}")
+            print(f"x_pred[:, self.T-1], x[:, self.T-1] = {x_pred[0, self.T - 1].detach()} {x[0, self.T - 1].detach()}")
+
+        μ, σ = self.cast(w_dists[:, :, :, 0]), self.cast(w_dists[:, :, :, 1])
+        p = Normal(μ, σ)
+        q = Normal(torch.zeros_like(μ), torch.ones_like(σ))
+
+        L_KLD = torch.distributions.kl.kl_divergence(p, q).sum(-1).mean()
+        self.optimizer.zero_grad()
+        L = L_nll + L_KLD
+        L.backward()
+        self.optimizer.step()
+
+        self.it += 1
+        return L_nll.item(), L_KLD.item(), L_rec.item()
 
     @classmethod
     def init_from_save(cls, path='param/dvbf_connected.pkl'):
@@ -138,7 +183,7 @@ class BayesFilterFullyConnected(nn.Module):
 
     @classmethod
     def init_from_replay_memory(cls, replay_memory, z_dim, u_max):
-        init_dict = {'seq_length': replay_memory.seq_length // 2,
+        init_dict = {'seq_length': replay_memory.seq_length,
                      'x_dim': replay_memory.state_dim,
                      'u_dim': replay_memory.action_dim,
                      'z_dim': z_dim,

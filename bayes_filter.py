@@ -12,15 +12,17 @@ class Generator(nn.Module):
         self.h_dim = h_dim
         self.w_dim = w_dim
         self.T = T
-        self.rnn = nn.GRU(x_dim, h_dim, bidirectional=True)
+        self.fc = nn.Sequential(nn.Linear(x_dim, h_dim), nn.Sigmoid(), nn.BatchNorm1d(h_dim), nn.Linear(h_dim, h_dim))
+        self.rnn = nn.GRU(h_dim, h_dim, bidirectional=True)
         self.p_ξ = nn.Sequential(nn.Linear(h_dim * 2, h_dim), nn.Sigmoid(), nn.BatchNorm1d(h_dim), nn.Linear(h_dim, h_dim))
         self.μ = nn.Sequential(nn.Linear(h_dim, h_dim), nn.Sigmoid(), nn.BatchNorm1d(h_dim), nn.Linear(h_dim, w_dim))
         self.σ = nn.Sequential(nn.Linear(h_dim, h_dim), nn.Sigmoid(), nn.BatchNorm1d(h_dim), nn.Linear(h_dim, w_dim), nn.Softplus())
         self.p_λ = nn.Sequential(nn.Linear(w_dim, h_dim), nn.Sigmoid(), nn.BatchNorm1d(h_dim), nn.Linear(h_dim, z_dim))
 
     def forward(self, x):
-        # (batch_size, seq_length, x_dim) = x.shape
-        bi_out, _ = self.rnn(x[:, 0:self.T])                 # bi_out: tensor of shape (batch_size, seq_length, h_dim*2)
+        (batch_size, seq_length, x_dim) = x.shape
+        h = self.fc(x.reshape(-1, x_dim)).view(batch_size, seq_length, -1)
+        bi_out, _ = self.rnn(h)                 # bi_out: tensor of shape (batch_size, seq_length, h_dim*2)
         h = self.p_ξ(bi_out[:, 0])
         (μ, σ) = self.μ(h), self.σ(h)
         dist = Normal(μ, σ)
@@ -147,7 +149,7 @@ class BayesFilter(nn.Module):
 
         return x_pred, w_dists, z_pred, x_dists
 
-    def forward(self, z, u, x=[]):
+    def forward(self, z, u, x=None):
         batch_size = u.shape[0]
         u = torch.clamp(u, min=-self.u_max, max=self.u_max)
 
@@ -157,7 +159,7 @@ class BayesFilter(nn.Module):
         A = torch.sum(α_A * a, axis=1)
         B = torch.sum(α_B * b, axis=1)
         C = torch.sum(α_C * c, axis=1)
-        if len(x) == 0:
+        if x is None:
             (w_μ, w_σ) = torch.zeros((batch_size, self.w_dim)), torch.ones((batch_size, self.w_dim))
         else:
             input = torch.cat((z, x, u), dim=1)
@@ -238,7 +240,7 @@ class BayesFilter(nn.Module):
 
     @classmethod
     def init_from_replay_memory(cls, replay_memory, z_dim, u_max):
-        init_dict = {'seq_length': replay_memory.seq_length // 2,
+        init_dict = {'seq_length': replay_memory.seq_length,
                      'x_dim': replay_memory.state_dim,
                      'u_dim': replay_memory.action_dim,
                      'z_dim': z_dim,

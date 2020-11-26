@@ -9,7 +9,7 @@ import progressbar
 class ReplayMemory():
     def __init__(self, args, controller, env):
         self.batch_size = args.batch_size
-        self.seq_length = 2 * args.seq_length
+        self.seq_length = args.seq_length
         # self.shift_x = shift
         # self.scale_x = scale
         # self.shift_u = shift_u

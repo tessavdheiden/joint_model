@@ -15,6 +15,7 @@ class SigmoidEnv(gym.Env):
     }
 
     def __init__(self):
+        self.name = 'Sigmoid'
         self.viewer = None
         self.u_max = 1
         self.action_space = spaces.Box(

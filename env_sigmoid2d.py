@@ -22,6 +22,7 @@ class Sigmoid2DEnv(gym.Env):
     }
 
     def __init__(self):
+        self.name = 'Sigmoid2D'
         self.viewer = None
         self.u_max = 1
         self.action_space = spaces.Box(

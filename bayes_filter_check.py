@@ -43,7 +43,7 @@ def visualize_latent_space3D(bayes_filter, replay_memory, ep=-1):
 
     # assert bayes_filter.x_dim == 2
     # idx = np.argsort(np.sqrt(np.square(x[:, 0]) + np.square(x[:, 1])))
-    idx = np.argsort(x[:, 0])
+    idx = np.argsort(x[:, -1])
     colors = cm.rainbow(np.linspace(0, 1, len(idx)))
 
     fig, ax = plt.subplots(ncols=3, nrows=2, figsize=(10, 6), subplot_kw=dict(projection='3d'))
