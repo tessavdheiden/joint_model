@@ -61,7 +61,7 @@ def visualize_latent_space3D(bayes_filter, replay_memory, ep=-1):
         ax[0, i].view_init(30, degrees[i])
         ax[0, i].set_title(f'angle {degrees[i]:.0f}')
 
-    idx = np.argsort(x0[:, 0])
+    idx = np.argsort(x0[:, -1])
     colors = cm.rainbow(np.linspace(0, 1, len(idx)))
     for i in range(3):
         ax[1, i].scatter(z0[idx, 0], z0[idx, 1], z0[idx, 2], marker='.', color=colors)

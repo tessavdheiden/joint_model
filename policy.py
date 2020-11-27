@@ -6,74 +6,122 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 import torch.optim as optim
 
 
-class Net(nn.Module):
+class ActorNet(nn.Module):
 
     def __init__(self):
-        super(Net, self).__init__()
-        self.v = nn.Sequential(nn.Linear(3, 100), nn.ReLU(), nn.Linear(100, 1))
+        super(ActorNet, self).__init__()
         self.fc = nn.Linear(3, 100)
-        self.mu_head = nn.Linear(100, 3)
-        self.sigma_head = nn.Linear(100, 3)
+        self.mu_head = nn.Linear(100, 1)
+        self.sigma_head = nn.Linear(100, 1)
 
     def forward(self, x):
-        v = self.v(x)
         x = F.relu(self.fc(x))
-        mu = torch.tanh(self.mu_head(x))
+        mu = 2.0 * F.tanh(self.mu_head(x))
         sigma = F.softplus(self.sigma_head(x))
-        return (mu, sigma), v
+        return (mu, sigma)
+
+
+class CriticNet(nn.Module):
+
+    def __init__(self):
+        super(CriticNet, self).__init__()
+        self.fc = nn.Linear(3, 100)
+        self.v_head = nn.Linear(100, 1)
+
+    def forward(self, x):
+        x = F.relu(self.fc(x))
+        state_value = self.v_head(x)
+        return state_value
 
 
 class Policy(object):
+    clip_param = 0.2
     max_grad_norm = 0.5
-    clip_param = 0.1  # epsilon in clipped loss
     ppo_epoch = 10
-    batch_size = 128
+    buffer_capacity, batch_size = 10, 32
 
     def __init__(self):
-        super(Policy, self).__init__()
-        self.net = Net()
-        self.optimizer = optim.Adam(self.net.parameters(), lr=1e-3)
+        from bayes_filter_fully_connected import BayesFilterFullyConnected
+        self.training_step = 0
+        self.anet = ActorNet().float()
+        self.cnet = CriticNet().float()
+        self.buffer = []
+        self.counter = 0
 
-    def sample(self, state):
+        self.optimizer_a = optim.Adam(self.anet.parameters(), lr=1e-4)
+        self.optimizer_c = optim.Adam(self.cnet.parameters(), lr=3e-4)
+
+        self.transition = BayesFilterFullyConnected.init_from_save()
+
+    def select_action(self, state):
         state = torch.from_numpy(state).float().unsqueeze(0)
         with torch.no_grad():
-            (mu, sigma) = self.net(state)[0]
+            (mu, sigma) = self.anet(state)
         dist = Normal(mu, sigma)
         action = dist.sample()
-        log_prob = dist.log_prob(action).sum(dim=1)
-        action = action.squeeze().cpu().numpy()
-        return action, log_prob.numpy()
+        action_log_prob = dist.log_prob(action)
+        action.clamp(-2.0, 2.0)
+        return action.item(), action_log_prob.item()
 
-    def update(self, transitions, gamma=.9):
-        s = torch.tensor([t.s for t in transitions], dtype=torch.float)
-        a = torch.tensor([t.a for t in transitions], dtype=torch.float).view(-1, 3)
-        r = torch.tensor([t.r for t in transitions], dtype=torch.float).view(-1, 1)
-        s_ = torch.tensor([t.s_ for t in transitions], dtype=torch.float)
+    def get_value(self, state):
 
-        old_action_log_probs = torch.tensor([t.a_prob for t in transitions], dtype=torch.float).view(-1, 1)
-
+        state = torch.from_numpy(state).float().unsqueeze(0)
         with torch.no_grad():
-            target_v = r + gamma * self.net(s_)[1]
-            adv = target_v - self.net(s)[1]
+            state_value = self.cnet(state)
+        return state_value.item()
+
+    def save_param(self):
+        torch.save(self.anet.state_dict(), 'param/ppo_anet_params.pkl')
+        torch.save(self.cnet.state_dict(), 'param/ppo_cnet_params.pkl')
+
+    def store(self, transition):
+        self.buffer.append(transition)
+        self.counter += 1
+        return self.counter % self.buffer_capacity == 0
+
+    def update(self, gamma=.9):
+        self.training_step += 1
+
+        s = torch.tensor([t.s for t in self.buffer], dtype=torch.float)
+        a = torch.tensor([t.a for t in self.buffer], dtype=torch.float).view(-1, 1)
+        r = torch.tensor([t.r for t in self.buffer], dtype=torch.float).view(-1, 1)
+        # s_ = torch.tensor([t.s_ for t in self.buffer], dtype=torch.float)
+        z_, _ = self.transition.propagate_solution(u=a, x=s)
+
+        old_action_log_probs = torch.tensor(
+            [t.a_log_p for t in self.buffer], dtype=torch.float).view(-1, 1)
+
+        r = (r - r.mean()) / (r.std() + 1e-5)
+        with torch.no_grad():
+            target_v = r + gamma * self.cnet(s_)
+
+        adv = (target_v - self.cnet(s)).detach()
 
         for _ in range(self.ppo_epoch):
-            for index in BatchSampler(SubsetRandomSampler(range(len(transitions))), self.batch_size, False):
-
-                (mu, sigma) = self.net(s[index])[0]
+            for index in BatchSampler(
+                    SubsetRandomSampler(range(self.buffer_capacity)), self.batch_size, False):
+                (mu, sigma) = self.anet(s[index])
                 dist = Normal(mu, sigma)
-                a_logp = dist.log_prob(a[index]).sum(dim=1, keepdim=True)
-                ratio = torch.exp(a_logp - old_action_log_probs[index])
+                action_log_probs = dist.log_prob(a[index])
+                ratio = torch.exp(action_log_probs - old_action_log_probs[index])
 
                 surr1 = ratio * adv[index]
-                surr2 = torch.clamp(ratio, 1.0 - self.clip_param, 1.0 + self.clip_param) * adv[index]
+                surr2 = torch.clamp(ratio, 1.0 - self.clip_param,
+                                    1.0 + self.clip_param) * adv[index]
                 action_loss = -torch.min(surr1, surr2).mean()
-                value_loss = F.smooth_l1_loss(self.net(s[index])[1], target_v[index])
-                loss = action_loss + 2. * value_loss
 
-                self.optimizer.zero_grad()
-                loss.backward()
-                # nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
-                self.optimizer.step()
+                self.optimizer_a.zero_grad()
+                action_loss.backward()
+                nn.utils.clip_grad_norm_(self.anet.parameters(), self.max_grad_norm)
+                self.optimizer_a.step()
+
+                value_loss = F.smooth_l1_loss(self.cnet(s[index]), target_v[index])
+                self.optimizer_c.zero_grad()
+                value_loss.backward()
+                nn.utils.clip_grad_norm_(self.cnet.parameters(), self.max_grad_norm)
+                self.optimizer_c.step()
+
+        del self.buffer[:]
 
     def save_params(self, path='net_params.pkl'):
         torch.save(self.net.state_dict(), path)

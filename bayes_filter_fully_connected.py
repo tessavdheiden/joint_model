@@ -23,7 +23,7 @@ class BayesFilterFullyConnected(nn.Module):
         self._create_optimizer()
         self.cast = lambda x: x
         self.it = 0
-        self.c = 1
+        self.c = .0001
 
     def _create_observation_network(self):
         self.q_trans = nn.Sequential(nn.Linear(self.z_dim + self.u_dim, self.h_dim),
@@ -105,9 +105,8 @@ class BayesFilterFullyConnected(nn.Module):
         trans = self.q_trans(input)
         trans_μ, trans_σ, trans_σ_bar = self.q_trans_μ(trans), self.q_trans_σ(trans), self.q_trans_σ_bar(trans)
         if x is None:  # empowerment
-            w_μ = trans_μ
-            w_σ = trans_σ
-            q_μ = trans_μ
+            w_μ, w_σ = torch.zeros_like(trans_μ), torch.ones_like(trans_σ)
+            z_dist = Normal(trans_μ, trans_σ)
         else:
             meas = self.q_meas(x)
             meas_μ, meas_σ = self.q_meas_μ(meas), self.q_meas_σ(meas)
@@ -115,8 +114,8 @@ class BayesFilterFullyConnected(nn.Module):
             q_σ = torch.sqrt((meas_σ ** 2 * trans_σ_bar ** 2) / (meas_σ ** 2 + trans_σ_bar ** 2))
             w_μ = (q_μ - trans_μ) / trans_σ
             w_σ = torch.sqrt((q_σ ** 2) / (trans_σ ** 2))
+            z_dist = Normal(q_μ, q_σ)
 
-        z_dist = Normal(q_μ, trans_σ)
         z_ = z_dist.rsample()
         return z_, (w_μ, w_σ)
 
@@ -164,7 +163,7 @@ class BayesFilterFullyConnected(nn.Module):
 
         L_KLD = torch.distributions.kl.kl_divergence(p, q).sum(-1).mean()
         self.optimizer.zero_grad()
-        L = L_nll + L_KLD
+        L = L_nll + self.c * L_KLD
         L.backward()
         self.optimizer.step()
 
