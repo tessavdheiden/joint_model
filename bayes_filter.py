@@ -86,8 +86,12 @@ class BayesFilter(nn.Module):
     def _create_decoding_network(self):
         self.p_θ_μ = nn.Sequential(nn.Linear(self.z_dim, self.h_dim),
                                    nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
+                                   nn.Linear(self.h_dim, self.h_dim),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
                                    nn.Linear(self.h_dim, self.x_dim))
         self.p_θ_σ = nn.Sequential(nn.Linear(self.z_dim, self.h_dim),
+                                   nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
+                                   nn.Linear(self.h_dim, self.h_dim),
                                    nn.Sigmoid(), nn.BatchNorm1d(self.h_dim),
                                    nn.Linear(self.h_dim, self.x_dim),
                                    nn.Softplus())

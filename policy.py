@@ -38,10 +38,9 @@ class Policy(object):
     clip_param = 0.2
     max_grad_norm = 0.5
     ppo_epoch = 10
-    buffer_capacity, batch_size = 10, 32
+    buffer_capacity, batch_size = 1000, 32
 
     def __init__(self):
-        from bayes_filter_fully_connected import BayesFilterFullyConnected
         self.training_step = 0
         self.anet = ActorNet().float()
         self.cnet = CriticNet().float()
@@ -51,8 +50,6 @@ class Policy(object):
         self.optimizer_a = optim.Adam(self.anet.parameters(), lr=1e-4)
         self.optimizer_c = optim.Adam(self.cnet.parameters(), lr=3e-4)
 
-        self.transition = BayesFilterFullyConnected.init_from_save()
-
     def select_action(self, state):
         state = torch.from_numpy(state).float().unsqueeze(0)
         with torch.no_grad():
@@ -61,7 +58,7 @@ class Policy(object):
         action = dist.sample()
         action_log_prob = dist.log_prob(action)
         action.clamp(-2.0, 2.0)
-        return action.item(), action_log_prob.item()
+        return action, action_log_prob
 
     def get_value(self, state):
 
@@ -85,8 +82,7 @@ class Policy(object):
         s = torch.tensor([t.s for t in self.buffer], dtype=torch.float)
         a = torch.tensor([t.a for t in self.buffer], dtype=torch.float).view(-1, 1)
         r = torch.tensor([t.r for t in self.buffer], dtype=torch.float).view(-1, 1)
-        # s_ = torch.tensor([t.s_ for t in self.buffer], dtype=torch.float)
-        z_, _ = self.transition.propagate_solution(u=a, x=s)
+        s_ = torch.tensor([t.s_ for t in self.buffer], dtype=torch.float)
 
         old_action_log_probs = torch.tensor(
             [t.a_log_p for t in self.buffer], dtype=torch.float).view(-1, 1)

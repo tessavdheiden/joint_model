@@ -14,7 +14,7 @@ class BallBoxEnv(gym.Env):
         self.name = 'BallInBox'
         self.viewer = None
         self.u_max = 1
-        self.dt = .1
+        self.dt = .5
         self.action_space = spaces.Box(
             low=-self.u_max,
             high=self.u_max, shape=(2,),
@@ -22,7 +22,7 @@ class BallBoxEnv(gym.Env):
         )
 
         self.observation_space = spaces.Box(
-            low=0,
+            low=-1,
             high=1, shape=(2,),
             dtype=np.float32
         )
@@ -35,11 +35,11 @@ class BallBoxEnv(gym.Env):
         x = self.state
 
         x += u * self.dt
-        self.state = np.clip(x, 0., 1.)
+        self.state = np.clip(x, -1, 1.)
         return self.state, None, False, {}
 
     def reset(self):
-        self.state = self.np_random.uniform(low=0., high=1., size=(2, ))
+        self.state = self.np_random.uniform(low=-1., high=1., size=(2, ))
         self.last_u = None
         return self._get_obs()
 
@@ -55,7 +55,7 @@ class BallBoxEnv(gym.Env):
         if self.viewer is None:
             from gym.envs.classic_control import rendering
             self.viewer = rendering.Viewer(500, 500)
-            self.viewer.set_bounds(0, 1, 0, 1)
+            self.viewer.set_bounds(-1, 1, -1, 1)
             ball = rendering.make_circle(.01)
             ball.set_color(0, 0, 0)
             self.ball_transform = rendering.Transform()

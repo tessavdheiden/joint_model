@@ -9,6 +9,7 @@ from sklearn.decomposition import PCA
 
 
 from bayes_filter import BayesFilter
+from bayes_filter_fully_connected import BayesFilterFullyConnected
 from replay_memory import ReplayMemory
 from controller import Controller
 from env_pendulum import PendulumEnv
@@ -224,6 +225,55 @@ def visualize_latent_spaceND(bayes_filter, replay_memory):
     plt.savefig(f"img/latent_space.png")
 
 
+def plot_trajectory(bayes_filter, replay_memory, ep=-1):
+    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(8, 4))
+    axc = plt.gca()
+    replay_memory.reset_batchptr_train()
+
+    for b in range(replay_memory.n_batches_train):
+        batch_dict = replay_memory.next_batch_train()
+        x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
+        _, _, z, _ = bayes_filter.propagate_solution(x=x, u=u)
+
+        z = z[:, 0]
+        x_dvbf, _ = bayes_filter.decode(z)
+        x_hat = []
+        x_hat.append(x_dvbf.unsqueeze(1))
+        for t in range(1, bayes_filter.T):
+            z_, _ = bayes_filter(u=u[:, t - 1], z=z)
+            x_dvbf, _ = bayes_filter.decode(z_)
+            z = z_
+            x_hat.append(x_dvbf.unsqueeze(1))
+        x_pred, _, _, _ = bayes_filter.propagate_solution(x, u)
+        x_hat = torch.cat(x_hat, dim=1)
+
+        t = np.arange(replay_memory.seq_length)
+        x_hat = x_hat.detach().numpy()
+        x_pred = x_pred.detach().numpy()
+        x = x.detach().numpy()
+        for i in range(replay_memory.batch_size):
+            c = next(axc._get_lines.prop_cycler)['color']
+            # ax[0].plot(x[i, :, 0], x[i, :, 1])
+            # ax[1].plot(x_pred[i, :, 0], x_pred[i, :, 1], linestyle='--', color=c, label='dvbf trans')
+            # ax[0].axis([-2, 2, -2, 2])
+            # ax[1].axis([-2, 2, -2, 2])
+
+            for dim in range(x_hat.shape[2]):
+                ax[dim].plot(t, x_hat[i, :, dim], linestyle='--', color=c, label='dvbf trans')
+                #ax[dim].plot(t, x_pred[i, :, dim], linestyle=':', color=c, label='dvbf prop')
+                ax[dim].plot(t, x[i, :, dim], color=c, label='true')
+                ax[dim].set_xlabel('time')
+                ax[dim].set_ylabel(f'x at dim={dim}')
+                ax[dim].legend()
+            if i > 0: break
+        break
+
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.suptitle(f'DVBF Prediction, ep = {ep}')
+    plt.savefig('img/pred_vs_true.png')
+    plt.close(fig)
+
+
 def main():
     from bayes_filter_train import args
     if not os.path.exists('param'):
@@ -243,12 +293,17 @@ def main():
 
     controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
-    bayes_filter = BayesFilter.init_from_save()
 
-    if bayes_filter.z_dim == 1:
-        visualize_latent_space1D(bayes_filter, replay_memory)
-    elif bayes_filter.z_dim == 2:
-        visualize_latent_space2D(bayes_filter, replay_memory)
+    if args.filter_type == 0:
+        bayes_filter = BayesFilter.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=2)
+    else:
+        bayes_filter = BayesFilterFullyConnected.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=3)
+
+    plot_trajectory(bayes_filter, replay_memory)
+    # if bayes_filter.z_dim == 1:
+    #     visualize_latent_space1D(bayes_filter, replay_memory)
+    # elif bayes_filter.z_dim == 2:
+    #     visualize_latent_space2D(bayes_filter, replay_memory)
 
 
 if __name__ == '__main__':
