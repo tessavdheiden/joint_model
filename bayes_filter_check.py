@@ -226,7 +226,7 @@ def visualize_latent_spaceND(bayes_filter, replay_memory):
 
 
 def plot_trajectory(bayes_filter, replay_memory, ep=-1):
-    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(8, 4))
+    fig, ax = plt.subplots(nrows=1, ncols=replay_memory.state_dim, figsize=(4 * replay_memory.state_dim, 4))
     axc = plt.gca()
     replay_memory.reset_batchptr_train()
 
@@ -253,10 +253,6 @@ def plot_trajectory(bayes_filter, replay_memory, ep=-1):
         x = x.detach().numpy()
         for i in range(replay_memory.batch_size):
             c = next(axc._get_lines.prop_cycler)['color']
-            # ax[0].plot(x[i, :, 0], x[i, :, 1])
-            # ax[1].plot(x_pred[i, :, 0], x_pred[i, :, 1], linestyle='--', color=c, label='dvbf trans')
-            # ax[0].axis([-2, 2, -2, 2])
-            # ax[1].axis([-2, 2, -2, 2])
 
             for dim in range(x_hat.shape[2]):
                 ax[dim].plot(t, x_hat[i, :, dim], linestyle='--', color=c, label='dvbf trans')

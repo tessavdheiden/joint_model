@@ -44,8 +44,8 @@ def train(replay_memory, bayes_filter):
                     visualize_latent_space3D(bayes_filter, replay_memory, i)
                 else:
                     visualize_latent_spaceND(bayes_filter, replay_memory)
-                if bayes_filter.x_dim == 2:
-                    plot_trajectory(bayes_filter, replay_memory, i)
+
+                plot_trajectory(bayes_filter, replay_memory, i)
 
         records[i] = Record(i, L_rec, L_NLL, L_KLD, bayes_filter.c)
         print(f'ep = {i},  L_NLL = {L_NLL:.2f} L_rec = {L_rec:.2f} L_KLD = {L_KLD:.4f}')
@@ -68,15 +68,15 @@ def train(replay_memory, bayes_filter):
 parser = argparse.ArgumentParser()
 parser.add_argument('--val_frac', type=float, default=0.1,
                     help='fraction of data to be witheld in validation set')
-parser.add_argument('--seq_length', type=int, default=32, help='sequence length for training')
+parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
 parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
-parser.add_argument('--num_epochs', type=int, default=101, help='number of epochs')
+parser.add_argument('--num_epochs', type=int, default=201, help='number of epochs')
 parser.add_argument('--n_trials', type=int, default=1000,
                     help='number of data sequences to collect in each episode')
-parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
+parser.add_argument('--trial_len', type=int, default=16, help='number of steps in each trial')
 parser.add_argument('--n_subseq', type=int, default=4,
                     help='number of subsequences to divide each sequence into')
-parser.add_argument('--env', type=int, default=1,
+parser.add_argument('--env', type=int, default=0,
                     help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d')
 parser.add_argument('--filter_type', type=int, default=1,
                     help='0=bayes filter, 1=bayes filter fully connected')
@@ -107,6 +107,8 @@ if __name__ == '__main__':
     if args.filter_type == 0:
         bayes_filter = BayesFilter.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=3)
     else:
-        bayes_filter = BayesFilterFullyConnected.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=2)
+        bayes_filter = BayesFilterFullyConnected.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=3)
+
+    assert bayes_filter.z_dim >= replay_memory.state_dim
 
     train(replay_memory, bayes_filter)

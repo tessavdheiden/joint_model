@@ -60,8 +60,8 @@ class BayesFilter(nn.Module):
         self._create_optimizer()
         self.cast = lambda x: x
         self.it = 1
-        self.Ta = 1e7
-        self.c = .001
+        self.Ta = 1e6
+        self.c = .01
 
     # Initialize potential transition matrices
     def _create_transition_matrices(self, std=1e-4):
@@ -115,42 +115,37 @@ class BayesFilter(nn.Module):
         w = N.rsample()
         return w, (w_μ, w_σ)
 
-    def _sample_x_(self, z_):
-        # return self.p_θ(z_)
+    def decode(self, z_):
         p_μ, p_σ = self.p_θ_μ(z_), self.p_θ_σ(z_)
         dist_p_θ = Normal(p_μ, p_σ)
         x_ = dist_p_θ.rsample()
         return x_, (p_μ, p_σ)
-
-    def _init_output(self, batch_size):
-        x_pred = self.cast(torch.zeros(batch_size, self.T, self.x_dim))
-        x_dists = self.cast(torch.zeros(batch_size, self.T, self.x_dim, 2))
-        w_dists = self.cast(torch.zeros(batch_size, self.T, self.w_dim, 2))
-        z_pred = self.cast(torch.zeros(batch_size, self.T, self.z_dim))
-        return x_pred, w_dists, z_pred, x_dists
 
     def propagate_solution(self, x, u):
         batch_size = x.shape[0]
 
         z, (w1_μ, w1_σ) = self._initial_generator(x)
 
-        x_pred, w_dists, z_pred, x_dists = self._init_output(batch_size)
-        x1, (x1_μ, x1_σ) = self._sample_x_(z)
-        x_pred[:, 0] = x1
-        x_dists[:, 0] = torch.stack([x1_μ, x1_σ], dim=-1)
-        w_dists[:, 0] = torch.stack([w1_μ, w1_σ], dim=-1)
-        z_pred[:, 0] = z
+        x1, (x1_μ, x1_σ) = self.decode(z)
+        x_pred, w_dists, z_pred, x_dists = [], [], [], []
+        x_pred.append(x1.unsqueeze(1))
+        x_dists.append(torch.stack([x1_μ, x1_σ], dim=-1).unsqueeze(1))
+        w_dists.append(torch.stack([w1_μ, w1_σ], dim=-1).unsqueeze(1))
+        z_pred.append(z.unsqueeze(1))
 
         for t in range(1, self.T):
             z_, (w_μ, w_σ) = self.forward(z=z, u=u[:, t - 1], x=x[:, t])
-            x_, (x_μ, x_σ) = self._sample_x_(z_)
+            x_, (x_μ, x_σ) = self.decode(z_)
             # Bookkeeping
-            w_dists[:, t] = torch.stack([w_μ, w_σ], dim=-1)
-            x_pred[:, t] = x_
-            x_dists[:, t] = torch.stack([x_μ, x_σ], dim=-1)
-            z_pred[:, t] = z_
+            w_dists.append(torch.stack([w_μ, w_σ], dim=-1).unsqueeze(1))
+            x_pred.append(x_.unsqueeze(1))
+            x_dists.append(torch.stack([x_μ, x_σ], dim=-1).unsqueeze(1))
+            z_pred.append(z_.unsqueeze(1))
             z = z_
-
+        x_pred = torch.cat(x_pred, dim=1)
+        w_dists = torch.cat(w_dists, dim=1)
+        z_pred = torch.cat(z_pred, dim=1)
+        x_dists = torch.cat(x_dists, dim=1)
         return x_pred, w_dists, z_pred, x_dists
 
     def forward(self, z, u, x=None):

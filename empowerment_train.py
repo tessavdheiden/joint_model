@@ -63,12 +63,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--val_frac', type=float, default=0.1,
                         help='fraction of data to be witheld in validation set')
-    parser.add_argument('--seq_length', type=int, default=8, help='sequence length for training')
+    parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
     parser.add_argument('--num_epochs', type=int, default=101, help='number of epochs')
     parser.add_argument('--n_trials', type=int, default=2000,
                         help='number of data sequences to collect in each episode')
-    parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
+    parser.add_argument('--trial_len', type=int, default=16, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
                         help='number of subsequences to divide each sequence into')
     parser.add_argument('--env', type=int, default=0,
@@ -98,6 +98,7 @@ def main():
         bayes_filter = BayesFilter.init_from_save()
     else:
         bayes_filter = BayesFilterFullyConnected.init_from_save()
+    assert bayes_filter.T == replay_memory.seq_length
 
     empowerment = Empowerment(env, controller=controller, transition_network=bayes_filter)
 

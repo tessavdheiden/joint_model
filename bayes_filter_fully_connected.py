@@ -75,9 +75,8 @@ class BayesFilterFullyConnected(nn.Module):
 
         z, (w1_μ, w1_σ) = self._initial_generator(x)
 
-        # x_pred, w_dists, z_pred, x_dists = self._init_output(batch_size)
         x1, (x1_μ, x1_σ) = self.decode(z)
-        x_pred, w_dists, z_pred, x_dists = [],[],[],[]
+        x_pred, w_dists, z_pred, x_dists = [], [], [], []
         x_pred.append(x1.unsqueeze(1))
         x_dists.append(torch.stack([x1_μ, x1_σ], dim=-1).unsqueeze(1))
         w_dists.append(torch.stack([w1_μ, w1_σ], dim=-1).unsqueeze(1))
