@@ -1,16 +1,12 @@
 import argparse
-import pickle
 from collections import namedtuple
-import matplotlib.pyplot as plt
-import gym
-import numpy as np
 import torch
 
 from policy import Policy
-from env_pendulum import PendulumEnv
+from envs.env_pendulum import PendulumEnv
 from replay_memory import ReplayMemory
 from controller import Controller
-from bayes_filter_fully_connected import BayesFilterFullyConnected
+from filters.bayes_filter_fully_connected import BayesFilterFullyConnected
 
 parser = argparse.ArgumentParser(description='Solve the Pendulum-v0 with PPO')
 parser.add_argument('--gamma', type=float, default=0.9, metavar='G', help='discount factor (default: 0.9)')

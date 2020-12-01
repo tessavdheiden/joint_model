@@ -1,6 +1,5 @@
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-import argparse
 from collections import namedtuple
 import torch
 import numpy as np
@@ -8,14 +7,15 @@ import os
 from sklearn.decomposition import PCA
 
 
-from bayes_filter import BayesFilter
-from bayes_filter_fully_connected import BayesFilterFullyConnected
+from filters.bayes_filter import BayesFilter
+from filters.bayes_filter_fully_connected import BayesFilterFullyConnected
+from filters.simple_filter import SimpleFilter
 from replay_memory import ReplayMemory
 from controller import Controller
-from env_pendulum import PendulumEnv
-from env_ball_box import BallBoxEnv
-from env_sigmoid import SigmoidEnv
-from env_sigmoid2d import Sigmoid2DEnv
+from envs.env_pendulum import PendulumEnv
+from envs.env_ball_box import BallBoxEnv
+from envs.env_sigmoid import SigmoidEnv
+from envs.env_sigmoid2d import Sigmoid2DEnv
 
 Record = namedtuple('Record', ['ep', 'l'])
 
@@ -265,7 +265,7 @@ def plot_trajectory(bayes_filter, replay_memory, ep=-1):
         break
 
     fig.tight_layout(rect=[0, 0.03, 1, 0.95])
-    fig.suptitle(f'DVBF Prediction, ep = {ep}')
+    fig.suptitle(f'{type(bayes_filter).__name__} Prediction, ep = {ep}')
     plt.savefig('img/pred_vs_true.png')
     plt.close(fig)
 
@@ -291,9 +291,11 @@ def main():
     replay_memory = ReplayMemory(args, controller=controller, env=env)
 
     if args.filter_type == 0:
-        bayes_filter = BayesFilter.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=2)
-    else:
-        bayes_filter = BayesFilterFullyConnected.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=3)
+        bayes_filter = BayesFilter.init_from_save()
+    elif args.filter_type == 1:
+        bayes_filter = BayesFilterFullyConnected.init_from_save()
+    elif args.filter_type == 2:
+        bayes_filter = SimpleFilter.init_from_save()
 
     plot_trajectory(bayes_filter, replay_memory)
     # if bayes_filter.z_dim == 1:

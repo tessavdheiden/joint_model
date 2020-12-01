@@ -3,7 +3,7 @@ import numpy as np
 from collections import namedtuple
 import matplotlib.pyplot as plt
 
-from env_pendulum import PendulumEnv
+from envs.env_pendulum import PendulumEnv
 from controller import Controller
 from policy import Policy
 

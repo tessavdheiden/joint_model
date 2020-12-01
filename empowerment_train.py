@@ -5,19 +5,18 @@ from collections import namedtuple
 import matplotlib.pyplot as plt
 
 
-from env_pendulum import PendulumEnv
-from env_ball_box import BallBoxEnv
-from env_sigmoid import SigmoidEnv
-from env_sigmoid2d import Sigmoid2DEnv
-from empowerment import Empowerment
+from envs.env_pendulum import PendulumEnv
+from envs.env_ball_box import BallBoxEnv
+from envs.env_sigmoid import SigmoidEnv
+from envs.env_sigmoid2d import Sigmoid2DEnv
+from empowerment.empowerment import Empowerment
 from controller import Controller
-from bayes_filter import BayesFilter
-from bayes_filter_fully_connected import BayesFilterFullyConnected
+from filters.bayes_filter import BayesFilter
+from filters.bayes_filter_fully_connected import BayesFilterFullyConnected
+from filters.simple_filter import SimpleFilter
 from replay_memory import ReplayMemory
-from empowerment_check import visualize_distributions_1D, \
-    visualize_empowerment_landschape_1D, visualize_empowerment_landschape_2D, visualize_distributions_2D
-from bayes_filter_check import visualize_latent_space1D, visualize_latent_space2D
-
+from empowerment_check import visualize_empowerment_landschape_1D, visualize_empowerment_landschape_2D
+from bayes_filter_check import visualize_latent_space1D
 
 Record = namedtuple('Transition', ['ep', 'E'])
 
@@ -73,7 +72,7 @@ def main():
                         help='number of subsequences to divide each sequence into')
     parser.add_argument('--env', type=int, default=0,
                         help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d')
-    parser.add_argument('--filter_type', type=int, default=1,
+    parser.add_argument('--filter_type', type=int, default=2,
                         help='0=bayes filter, 1=bayes filter fully connected')
     args = parser.parse_args()
 
@@ -96,8 +95,11 @@ def main():
     replay_memory = ReplayMemory(args, controller=controller, env=env)
     if args.filter_type == 0:
         bayes_filter = BayesFilter.init_from_save()
-    else:
+    elif args.filter_type == 1:
         bayes_filter = BayesFilterFullyConnected.init_from_save()
+    elif args.filter_type == 2:
+        bayes_filter = SimpleFilter.init_from_save()
+
     assert bayes_filter.T == replay_memory.seq_length
 
     empowerment = Empowerment(env, controller=controller, transition_network=bayes_filter)
