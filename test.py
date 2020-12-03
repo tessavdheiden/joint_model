@@ -87,4 +87,12 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    theta = np.linspace(-np.pi, np.pi, 16)
+    x = np.array([np.cos(theta), np.sin(theta)])
+    t = np.arctan2(x[1, :], x[0, :])
+    print(x.shape)
+    print(t.shape)
+    plt.plot(np.arange(16), t)
+    plt.plot(np.arange(16), theta)
+    plt.savefig('tmp.png')
+    #main()

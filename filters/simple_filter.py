@@ -6,9 +6,10 @@ from filters.bayes_filter import Generator
 
 
 class SimpleFilter(nn.Module):
-    def __init__(self, seq_length, x_dim, u_dim, z_dim, u_max):
+    def __init__(self, seq_length, x_dim, u_dim, z_dim, u_max, sys):
 
         super(SimpleFilter, self).__init__()
+        self.sys = sys
         self.T = seq_length
         self.x_dim = x_dim
         self.u_dim = u_dim
@@ -159,7 +160,8 @@ class SimpleFilter(nn.Module):
                      'x_dim': replay_memory.state_dim,
                      'u_dim': replay_memory.action_dim,
                      'z_dim': z_dim,
-                     'u_max': u_max}
+                     'u_max': u_max,
+                     'sys': replay_memory.env.name}
         instance = cls(**init_dict)
         instance.init_dict = init_dict
         return instance

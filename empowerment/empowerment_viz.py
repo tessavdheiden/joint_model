@@ -47,7 +47,7 @@ def visualize_empowerment_landschape_1D(empowerment, bayes_filter, replay_memory
     plt.savefig('img/empowerment_landscape.png')
 
 
-def visualize_distributions_1D(empowerment, bayes_filter, replay_memory, ep=-1):
+def visualize_source_planning_distributions_1D(empowerment, bayes_filter, replay_memory, ep=-1):
     replay_memory.reset_batchptr_train()
     x, z, e = [], [], []
     for b in range(replay_memory.n_batches_train):
@@ -88,7 +88,7 @@ def visualize_distributions_1D(empowerment, bayes_filter, replay_memory, ep=-1):
     plt.savefig('img/dist_source.png')
 
 
-def visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory, ep=-1):
+def visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory, ep=-1, args=""):
     replay_memory.reset_batchptr_train()
     x, z, e = [], [], []
     for b in range(replay_memory.n_batches_train):
@@ -97,28 +97,28 @@ def visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory
         u_in = torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1]
         x.append(x_in)
 
-        x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
-        z_out = z_out.reshape(-1, bayes_filter.z_dim)
-        e_out = empowerment(z_out)
+        # x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
+        # z_out = z_out.reshape(-1, bayes_filter.z_dim)
+        e_out = empowerment(x_in.view(-1, x_in.shape[2]))
         e.append(e_out)
 
-        z.append(z_out)
+        # z.append(z_out)
 
     x = torch.cat(x, dim=0).numpy().reshape(-1, bayes_filter.x_dim)
     e = torch.cat(e, dim=0).numpy().reshape(-1)
-    if bayes_filter.x_dim > 2:
+    if bayes_filter.sys == 'Pendulum':
         x1 = np.arctan2(x[:, 1], x[:, 0])
         x2 = x[:, 2]
     else:
         x1 = x[:, 0]
         x2 = x[:, 1]
     fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 3))
-    c = ax.hexbin(x1, x2, gridsize=10, C=e[:], mincnt=1)
+    c = ax.hexbin(x1, x2, gridsize=10, C=e[:], mincnt=1, vmin=e.mean() - .1, vmax=e.mean() + .1)
     fig.colorbar(c, ax=ax)
     ax.set_title(f'Empowerment Landscape, ep = {ep}')
     ax.set_xlabel('x at dim=0')
-    ax.set_xlabel('x at dim=1')
-    plt.savefig('img/empowerment_landscape.png')
+    ax.set_ylabel('x at dim=1')
+    plt.savefig(f'img/empowerment_landscape{args}.png')
     plt.close()
 
 
@@ -172,7 +172,4 @@ def visualize_distributions_2D(empowerment, bayes_filter, replay_memory):
     plt.tight_layout()
     plt.savefig('img/dist_source.png')
     plt.close()
-
-
-
 

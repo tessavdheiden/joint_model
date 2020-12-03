@@ -10,7 +10,7 @@ from sklearn.decomposition import PCA
 from filters.bayes_filter import BayesFilter
 from filters.bayes_filter_fully_connected import BayesFilterFullyConnected
 from filters.simple_filter import SimpleFilter
-from replay_memory import ReplayMemory
+from memory.replay_memory import ReplayMemory
 from controller import Controller
 from envs.env_pendulum import PendulumEnv
 from envs.env_ball_box import BallBoxEnv
@@ -137,21 +137,7 @@ def visualize_distributions_2D(bayes_filter, replay_memory):
         z_pred = z_pred.view(-1, z_pred.shape[2])
         Z.append(z_pred)
 
-        x = x.reshape(-1, x.shape[2])
-        X.append(x)
-        U.append(u.reshape(-1, u.shape[2]))
-
-    X = torch.cat(X, dim=0)
     Z = torch.cat(Z, dim=0)
-
-    fig, ax = plt.subplots(ncols=3, nrows=1, figsize=(9, 3))
-    ax[0].hist(X[:, 0].numpy(), bins=10)
-    ax[0].set_xlabel('x at dim=0')
-    ax[1].hist(X[:, 1].numpy(), bins=10)
-    ax[1].set_xlabel('x at dim=1')
-    ax[2].hist2d(X[:, 0].numpy(), X[:, 1].numpy())
-    plt.tight_layout()
-    plt.savefig('img/dist_x.png')
 
     fig, ax = plt.subplots(ncols=2, nrows=1, figsize=(6, 3))
     ax[0].hist(Z[:, 0].numpy(), bins=10)
@@ -272,7 +258,7 @@ def plot_trajectory(bayes_filter, replay_memory, ep=-1):
 
 def main():
     from bayes_filter_train import args
-    if not os.path.exists('param'):
+    if not os.path.exists('../param'):
         print('bayes filter not trained')
 
     torch.manual_seed(0)

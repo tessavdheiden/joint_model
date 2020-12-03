@@ -14,9 +14,9 @@ from controller import Controller
 from filters.bayes_filter import BayesFilter
 from filters.bayes_filter_fully_connected import BayesFilterFullyConnected
 from filters.simple_filter import SimpleFilter
-from replay_memory import ReplayMemory
-from empowerment_check import visualize_empowerment_landschape_1D, visualize_empowerment_landschape_2D
-from bayes_filter_check import visualize_latent_space1D
+from memory.replay_memory import ReplayMemory
+from empowerment.empowerment_viz import visualize_empowerment_landschape_1D, visualize_empowerment_landschape_2D
+from filters.bayes_filter_viz import visualize_latent_space1D
 
 Record = namedtuple('Transition', ['ep', 'E'])
 
@@ -31,8 +31,9 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
         for b in range(replay_memory.n_batches_train):
             batch_dict = replay_memory.next_batch_train()
             x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
-            _, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
-            E[b, :] = empowerment.update(z_pred.reshape(-1, z_pred.shape[2]))
+            # _, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
+            # E[b, :] = empowerment.update(z_pred.reshape(-1, z_pred.shape[2]))
+            E[b, :] = empowerment.update(x.reshape(-1, x.shape[2]))
 
         if i % 10 == 0:
             with torch.no_grad():
@@ -64,7 +65,7 @@ def main():
                         help='fraction of data to be witheld in validation set')
     parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
-    parser.add_argument('--num_epochs', type=int, default=101, help='number of epochs')
+    parser.add_argument('--num_epochs', type=int, default=1001, help='number of epochs')
     parser.add_argument('--n_trials', type=int, default=2000,
                         help='number of data sequences to collect in each episode')
     parser.add_argument('--trial_len', type=int, default=16, help='number of steps in each trial')

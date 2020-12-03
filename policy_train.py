@@ -4,7 +4,7 @@ import torch
 
 from policy import Policy
 from envs.env_pendulum import PendulumEnv
-from replay_memory import ReplayMemory
+from memory.replay_memory import ReplayMemory
 from controller import Controller
 from filters.bayes_filter_fully_connected import BayesFilterFullyConnected
 

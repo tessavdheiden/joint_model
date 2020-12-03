@@ -8,13 +8,13 @@ import argparse
 from filters.bayes_filter import BayesFilter
 from filters.bayes_filter_fully_connected import BayesFilterFullyConnected
 from filters.simple_filter import SimpleFilter
-from replay_memory import ReplayMemory
+from memory.replay_memory import ReplayMemory
 from controller import Controller
 from envs.env_pendulum import PendulumEnv
 from envs.env_ball_box import BallBoxEnv
 from envs.env_sigmoid import SigmoidEnv
 from envs.env_sigmoid2d import Sigmoid2DEnv
-from bayes_filter_check import visualize_latent_space3D, visualize_latent_space2D, visualize_latent_space1D, \
+from filters.bayes_filter_viz import visualize_latent_space3D, visualize_latent_space2D, visualize_latent_space1D, \
                                 visualize_latent_spaceND, plot_trajectory
 
 Record = namedtuple('Record', ['ep', 'l_r', 'l_nll', 'l_k', 'c'])

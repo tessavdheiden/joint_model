@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 import torch.optim as optim
-
+from envs.env_pendulum import step
 
 class Net(nn.Module):
 
@@ -40,8 +40,8 @@ class Empowerment(nn.Module):
         self.auto_regressive = Net(self.z_dim * 2 + self.action_dim, self.action_dim, self.h_dim)
 
         self.optimizer_planning = optim.Adam(list(self.planning.parameters())
-                                    + list(self.auto_regressive.parameters()), lr=1e-4)
-        self.optimizer_source = optim.Adam(self.source.parameters(), lr=1e-5)
+                                    + list(self.auto_regressive.parameters()), lr=1e-3)
+        self.optimizer_source = optim.Adam(self.source.parameters(), lr=1e-4)
         self.planning_steps = 4
 
         self.it = 0
@@ -57,9 +57,9 @@ class Empowerment(nn.Module):
             a_ω = dist_ω.rsample()
             all_a_ω.append(a_ω.unsqueeze(1))
             all_log_prob_ω.append(dist_ω.log_prob(a_ω).unsqueeze(1))
-            z_, _ = self.transition(z_, a_ω)
-            # a_ω = torch.clamp(a_ω, -1, 1)
-            # z_ = torch.clamp(a_ω+z_, 0, 1)
+            #z_, _ = self.transition(z_, a_ω)
+            #a_ω = torch.clamp(a_ω, -1, 1)
+            z_ = step(z, a_ω)
 
         all_a_ω = torch.cat(all_a_ω, dim=1)
         all_log_prob_ω = torch.cat(all_log_prob_ω, dim=1)
