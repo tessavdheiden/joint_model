@@ -2,7 +2,13 @@ import gym
 from gym import spaces
 from gym.utils import seeding
 import numpy as np
+import torch
+
 from os import path
+
+MASS = 1.
+DELTA_T = .05
+MAX_TORQUE = 1.
 
 
 class PendulumEnv(gym.Env):
@@ -14,10 +20,10 @@ class PendulumEnv(gym.Env):
     def __init__(self, g=10.0):
         self.name = 'Pendulum'
         self.max_speed = 8
-        self.u_max = 1.
-        self.dt = .05
+        self.u_max = MAX_TORQUE
+        self.dt = DELTA_T
         self.g = g
-        self.m = 1.
+        self.m = MASS
         self.l = 1.
         self.viewer = None
 
@@ -97,26 +103,27 @@ class PendulumEnv(gym.Env):
             self.viewer.close()
             self.viewer = None
 
+    def step_batch(self, x, u):
+        th, thdot = torch.atan2(x[:, 1], x[:, 0]).view(-1, 1), x[:, 2].view(-1, 1)  # th := theta
+
+        max_speed = 8
+        u_max = MAX_TORQUE
+        dt = DELTA_T
+        g = 10.0
+        m = MASS
+        l = 1.
+
+        u = torch.clamp(u, -u_max, u_max)
+
+        newthdot = thdot + (-3 * g / (2 * l) * torch.sin(th + np.pi) + 3. / (m * l ** 2) * u) * dt
+        newth = th + newthdot * dt
+        newthdot = torch.clamp(newthdot, -max_speed, max_speed)
+
+        x = torch.stack((torch.cos(newth), torch.sin(newth), newthdot), dim=-1).squeeze(1)
+        return x
+
 
 def angle_normalize(x):
     return (((x+np.pi) % (2*np.pi)) - np.pi)
 
-import torch
-def step(x, u):
-    th, thdot = torch.atan2(x[:, 1], x[:, 0]).view(-1, 1), x[:, 2].view(-1, 1)  # th := theta
 
-    max_speed = 8
-    u_max = 1.
-    dt = .05
-    g = 10.0
-    m = 1.
-    l = 1.
-
-    u = torch.clamp(u, -u_max, u_max)
-
-    newthdot = thdot + (-3 * g / (2 * l) * np.sin(th + np.pi) + 3. / (m * l ** 2) * u) * dt
-    newth = th + newthdot * dt
-    newthdot = torch.clamp(newthdot, -max_speed, max_speed)
-
-    x = torch.stack((torch.cos(newth), torch.sin(newth), newthdot), dim=-1).squeeze(1)
-    return x

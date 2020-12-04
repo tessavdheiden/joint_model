@@ -4,6 +4,7 @@ import torch
 import numpy as np
 import os
 import argparse
+import time
 
 from filters.bayes_filter import BayesFilter
 from filters.bayes_filter_fully_connected import BayesFilterFullyConnected
@@ -27,6 +28,8 @@ def train(replay_memory, bayes_filter):
     for i in range(args.num_epochs):
         replay_memory.reset_batchptr_train()
 
+        bayes_filter.prepare_update()
+        t = time.time()
         for b in range(replay_memory.n_batches_train):
             batch_dict = replay_memory.next_batch_train()
             x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
@@ -35,6 +38,7 @@ def train(replay_memory, bayes_filter):
             L_NLL, L_KLD, L_rec = bayes_filter.update(x, u, gu)
 
         if i % 10 == 0:
+            bayes_filter.prepare_eval()
             with torch.no_grad():
                 bayes_filter.save_params()
                 if bayes_filter.z_dim == 1:
@@ -47,7 +51,8 @@ def train(replay_memory, bayes_filter):
                     visualize_latent_spaceND(bayes_filter, replay_memory)
 
                 plot_trajectory(bayes_filter, replay_memory, i)
-
+            bayes_filter.prepare_update()
+        print(f'{(time.time() - t):.2f}')
         records[i] = Record(i, L_rec, L_NLL, L_KLD, bayes_filter.c)
         print(f'ep = {i},  L_NLL = {L_NLL:.2f} L_rec = {L_rec:.2f} L_KLD = {L_KLD:.4f}')
 
@@ -71,7 +76,7 @@ parser.add_argument('--val_frac', type=float, default=0.1,
                     help='fraction of data to be witheld in validation set')
 parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
 parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
-parser.add_argument('--num_epochs', type=int, default=201, help='number of epochs')
+parser.add_argument('--num_epochs', type=int, default=401, help='number of epochs')
 parser.add_argument('--n_trials', type=int, default=1000,
                     help='number of data sequences to collect in each episode')
 parser.add_argument('--trial_len', type=int, default=16, help='number of steps in each trial')
@@ -79,8 +84,8 @@ parser.add_argument('--n_subseq', type=int, default=4,
                     help='number of subsequences to divide each sequence into')
 parser.add_argument('--env', type=int, default=0,
                     help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d')
-parser.add_argument('--filter_type', type=int, default=2,
-                    help='0=bayes filter, 1=bayes filter fully connected')
+parser.add_argument('--filter_type', type=int, default=1,
+                    help='0=bayes filter, 1=bayes filter fully connected, 3=filter simple')
 args = parser.parse_args()
 
 

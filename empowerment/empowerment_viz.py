@@ -97,9 +97,11 @@ def visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory
         u_in = torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1]
         x.append(x_in)
 
-        # x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
-        # z_out = z_out.reshape(-1, bayes_filter.z_dim)
-        e_out = empowerment(x_in.view(-1, x_in.shape[2]))
+        if empowerment.use_filter:
+            x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
+            e_out = empowerment(z_out.view(-1, bayes_filter.z_dim))
+        else:
+            e_out = empowerment(x_in.view(-1, x_in.shape[2]))
         e.append(e_out)
 
         # z.append(z_out)
@@ -113,7 +115,7 @@ def visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory
         x1 = x[:, 0]
         x2 = x[:, 1]
     fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 3))
-    c = ax.hexbin(x1, x2, gridsize=10, C=e[:], mincnt=1, vmin=e.mean() - .1, vmax=e.mean() + .1)
+    c = ax.hexbin(x1, x2, gridsize=20, C=e[:], mincnt=1, vmin=e.mean() - .2, vmax=e.mean() + .2)
     fig.colorbar(c, ax=ax)
     ax.set_title(f'Empowerment Landscape, ep = {ep}')
     ax.set_xlabel('x at dim=0')

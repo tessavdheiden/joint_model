@@ -28,14 +28,20 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
         replay_memory.reset_batchptr_train()
 
         E = np.zeros((replay_memory.n_batches_train, args.batch_size * args.seq_length))
+
+        empowerment.prepare_update()
         for b in range(replay_memory.n_batches_train):
             batch_dict = replay_memory.next_batch_train()
             x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
-            # _, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
-            # E[b, :] = empowerment.update(z_pred.reshape(-1, z_pred.shape[2]))
-            E[b, :] = empowerment.update(x.reshape(-1, x.shape[2]))
+            if empowerment.use_filter:
+                bayes_filter.prepare_eval()
+                _, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
+                E[b, :] = empowerment.update(z_pred.reshape(-1, z_pred.shape[2]))
+            else:
+                E[b, :] = empowerment.update(x.reshape(-1, x.shape[2]))
 
         if i % 10 == 0:
+            empowerment.prepare_eval()
             with torch.no_grad():
                 if replay_memory.state_dim == 1:
                     visualize_empowerment_landschape_1D(empowerment, bayes_filter, replay_memory, ep=i)
@@ -44,6 +50,7 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
                 elif replay_memory.state_dim > 1:
                     visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory, ep=i)
                     #visualize_distributions_2D(empowerment, bayes_filter, replay_memory)
+            empowerment.prepare_update()
 
         records[i] = Record(i, E.mean())
         print(f'ep = {i}, empowerment = {records[i].E:.4f}')
@@ -73,8 +80,10 @@ def main():
                         help='number of subsequences to divide each sequence into')
     parser.add_argument('--env', type=int, default=0,
                         help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d')
-    parser.add_argument('--filter_type', type=int, default=2,
-                        help='0=bayes filter, 1=bayes filter fully connected')
+    parser.add_argument('--filter_type', type=int, default=1,
+                        help='0=bayes filter, 1=bayes filter fully connected, 3=filter simple')
+    parser.add_argument('--use_filter', type=int, default=1,
+                        help='0=env, 1=filter')
     args = parser.parse_args()
 
     if not os.path.exists('param'):
@@ -103,7 +112,7 @@ def main():
 
     assert bayes_filter.T == replay_memory.seq_length
 
-    empowerment = Empowerment(env, controller=controller, transition_network=bayes_filter)
+    empowerment = Empowerment(env, controller=controller, transition_network=bayes_filter, use_filter=args.use_filter)
 
     train_empowerment(env, empowerment, bayes_filter, replay_memory, args)
 
