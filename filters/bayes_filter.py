@@ -6,6 +6,9 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 
 
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 class Generator(nn.Module):
     def __init__(self, z_dim, h_dim, x_dim, w_dim, T):
         super(Generator, self).__init__()
@@ -184,6 +187,22 @@ class BayesFilter(nn.Module):
         # self.optimizer = optim.Adadelta(self.params, lr=1e-1)
         self.optimizer = optim.Adam(self.params, lr=1e-3)
         self.loss_rec = nn.MSELoss()
+
+    def prepare_update(self):
+        if DEVICE == 'cuda':
+            self.cast = lambda x: x.cuda()
+        else:
+            self.cast = lambda x: x.cpu()
+
+        for network in self.networks:
+            network = self.cast(network)
+            network.train()
+
+    def prepare_eval(self):
+        self.cast = lambda x: x.cpu()
+        for network in self.networks:
+            network = self.cast(network)
+            network.eval()
 
     def update(self, x, u, gradient_updates, debug=False):
         if gradient_updates % 2500 == 0:

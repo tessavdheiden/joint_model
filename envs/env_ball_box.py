@@ -2,6 +2,7 @@ import gym
 from gym import spaces
 from gym.utils import seeding
 import numpy as np
+import torch
 
 
 class BallBoxEnv(gym.Env):
@@ -68,3 +69,7 @@ class BallBoxEnv(gym.Env):
         self.ball_transform.set_translation(self.state[0], self.state[1])
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
+
+    def step_batch(self, x, u):
+        u = torch.clamp(u, -1, 1)
+        return torch.clamp(x + u * self.dt, -1, 1)

@@ -69,7 +69,10 @@ class Empowerment(nn.Module):
             all_a_ω.append(a_ω.unsqueeze(1))
             all_log_prob_ω.append(dist_ω.log_prob(a_ω).unsqueeze(1))
 
-            z_ = self.transition(z_, a_ω)[0] if self.use_filter else self.step(z_, a_ω)
+            if self.use_filter:
+                z_ = self.transition(z_, a_ω)[0]
+            else:
+                z_ = self.step(z_, a_ω)
 
         all_a_ω = torch.cat(all_a_ω, dim=1)
         all_log_prob_ω = torch.cat(all_log_prob_ω, dim=1)

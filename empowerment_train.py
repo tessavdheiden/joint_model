@@ -70,19 +70,19 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--val_frac', type=float, default=0.1,
                         help='fraction of data to be witheld in validation set')
-    parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
+    parser.add_argument('--seq_length', type=int, default=32, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
     parser.add_argument('--num_epochs', type=int, default=1001, help='number of epochs')
-    parser.add_argument('--n_trials', type=int, default=2000,
+    parser.add_argument('--n_trials', type=int, default=1000,
                         help='number of data sequences to collect in each episode')
-    parser.add_argument('--trial_len', type=int, default=16, help='number of steps in each trial')
+    parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
                         help='number of subsequences to divide each sequence into')
-    parser.add_argument('--env', type=int, default=0,
+    parser.add_argument('--env', type=int, default=1,
                         help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d')
     parser.add_argument('--filter_type', type=int, default=1,
                         help='0=bayes filter, 1=bayes filter fully connected, 3=filter simple')
-    parser.add_argument('--use_filter', type=int, default=1,
+    parser.add_argument('--use_filter', type=int, default=1bv,
                         help='0=env, 1=filter')
     args = parser.parse_args()
 
@@ -110,7 +110,8 @@ def main():
     elif args.filter_type == 2:
         bayes_filter = SimpleFilter.init_from_save()
 
-    assert bayes_filter.T == replay_memory.seq_length
+    # if bayes_filter.T > replay_memory.seq_length:
+    #     bayes_filter.T = replay_memory.seq_length
 
     empowerment = Empowerment(env, controller=controller, transition_network=bayes_filter, use_filter=args.use_filter)
 

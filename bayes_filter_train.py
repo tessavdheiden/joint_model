@@ -74,15 +74,15 @@ def train(replay_memory, bayes_filter):
 parser = argparse.ArgumentParser()
 parser.add_argument('--val_frac', type=float, default=0.1,
                     help='fraction of data to be witheld in validation set')
-parser.add_argument('--seq_length', type=int, default=16, help='sequence length for training')
+parser.add_argument('--seq_length', type=int, default=32, help='sequence length for training')
 parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
 parser.add_argument('--num_epochs', type=int, default=401, help='number of epochs')
-parser.add_argument('--n_trials', type=int, default=1000,
+parser.add_argument('--n_trials', type=int, default=2000,
                     help='number of data sequences to collect in each episode')
-parser.add_argument('--trial_len', type=int, default=16, help='number of steps in each trial')
+parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
 parser.add_argument('--n_subseq', type=int, default=4,
                     help='number of subsequences to divide each sequence into')
-parser.add_argument('--env', type=int, default=0,
+parser.add_argument('--env', type=int, default=1,
                     help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d')
 parser.add_argument('--filter_type', type=int, default=1,
                     help='0=bayes filter, 1=bayes filter fully connected, 3=filter simple')
@@ -113,7 +113,7 @@ if __name__ == '__main__':
     if args.filter_type == 0:
         bayes_filter = BayesFilter.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=3)
     elif args.filter_type == 1:
-        bayes_filter = BayesFilterFullyConnected.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=3)
+        bayes_filter = BayesFilterFullyConnected.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=2)
     elif args.filter_type == 2:
         bayes_filter = SimpleFilter.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=3)
 

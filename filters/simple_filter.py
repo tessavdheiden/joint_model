@@ -5,6 +5,9 @@ from torch.distributions import Normal
 from filters.bayes_filter import Generator
 
 
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 class SimpleFilter(nn.Module):
     def __init__(self, seq_length, x_dim, u_dim, z_dim, u_max, sys):
 
@@ -124,6 +127,22 @@ class SimpleFilter(nn.Module):
         save_dict = {'init_dict': self.init_dict,
                     'networks': [network.state_dict() for network in self.networks]}
         torch.save(save_dict, path)
+
+    def prepare_update(self):
+        if DEVICE == 'cuda':
+            self.cast = lambda x: x.cuda()
+        else:
+            self.cast = lambda x: x.cpu()
+
+        for network in self.networks:
+            network = self.cast(network)
+            network.train()
+
+    def prepare_eval(self):
+        self.cast = lambda x: x.cpu()
+        for network in self.networks:
+            network = self.cast(network)
+            network.eval()
 
     def update(self, x, u, gradient_updates, debug=False):
         x, u = self.cast(x[:, 0:self.T]), self.cast(u[:, 0:self.T])
