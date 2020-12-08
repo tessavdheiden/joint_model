@@ -15,6 +15,7 @@ from envs.env_pendulum import PendulumEnv
 from envs.env_ball_box import BallBoxEnv
 from envs.env_sigmoid import SigmoidEnv
 from envs.env_sigmoid2d import Sigmoid2DEnv
+from envs.env_acrobot import AcrobotEnv
 from filters.bayes_filter_viz import visualize_latent_space3D, visualize_latent_space2D, visualize_latent_space1D, \
                                 visualize_latent_spaceND, plot_trajectory
 
@@ -82,10 +83,11 @@ parser.add_argument('--n_trials', type=int, default=2000,
 parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
 parser.add_argument('--n_subseq', type=int, default=4,
                     help='number of subsequences to divide each sequence into')
-parser.add_argument('--env', type=int, default=1,
-                    help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d')
-parser.add_argument('--filter_type', type=int, default=1,
+parser.add_argument('--env', type=int, default=4,
+                    help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d, 4=acrobot')
+parser.add_argument('--filter_type', type=int, default=0,
                     help='0=bayes filter, 1=bayes filter fully connected, 3=filter simple')
+parser.add_argument('--z_dim', type=int, default=3)
 args = parser.parse_args()
 
 
@@ -106,17 +108,19 @@ if __name__ == '__main__':
         env = SigmoidEnv()
     elif args.env == 3:
         env = Sigmoid2DEnv()
+    elif args.env == 4:
+        env = AcrobotEnv()
     env.seed(0)
 
     controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
     if args.filter_type == 0:
-        bayes_filter = BayesFilter.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=3)
+        bayes_filter = BayesFilter.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=args.z_dim)
     elif args.filter_type == 1:
-        bayes_filter = BayesFilterFullyConnected.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=2)
+        bayes_filter = BayesFilterFullyConnected.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=args.z_dim)
     elif args.filter_type == 2:
-        bayes_filter = SimpleFilter.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=3)
+        bayes_filter = SimpleFilter.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=args.z_dim)
 
-    assert bayes_filter.z_dim >= replay_memory.state_dim
+    assert bayes_filter.z_dim <= replay_memory.state_dim
 
     train(replay_memory, bayes_filter)

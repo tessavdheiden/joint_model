@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import scipy.stats as stats
+from envs.env_pendulum import PendulumEnv
 
 
 def visualize_empowerment_landschape_1D(empowerment, bayes_filter, replay_memory, ep=-1):
@@ -88,40 +89,39 @@ def visualize_source_planning_distributions_1D(empowerment, bayes_filter, replay
     plt.savefig('img/dist_source.png')
 
 
-def visualize_empowerment_landschape_2D(empowerment, bayes_filter, replay_memory, ep=-1, args=""):
+def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_memory, ep=-1):
     replay_memory.reset_batchptr_train()
-    x, z, e = [], [], []
+    x, e = [], []
     for b in range(replay_memory.n_batches_train):
         batch_dict = replay_memory.next_batch_train()
         x_in = torch.from_numpy(batch_dict["states"])[:, :bayes_filter.T]
         u_in = torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1]
         x.append(x_in)
 
-        if empowerment.use_filter:
+        if args.use_filter:
             x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
             e_out = empowerment(z_out.view(-1, bayes_filter.z_dim))
         else:
             e_out = empowerment(x_in.view(-1, x_in.shape[2]))
         e.append(e_out)
 
-        # z.append(z_out)
-
     x = torch.cat(x, dim=0).numpy().reshape(-1, bayes_filter.x_dim)
     e = torch.cat(e, dim=0).numpy().reshape(-1)
-    if bayes_filter.sys == 'Pendulum':
+    if args.env == 0:
         x1 = np.arctan2(x[:, 1], x[:, 0])
         x2 = x[:, 2]
     else:
         x1 = x[:, 0]
         x2 = x[:, 1]
     fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 3))
-    c = ax.hexbin(x1, x2, gridsize=20, C=e[:], mincnt=1, vmin=e.mean() - .2, vmax=e.mean() + .2)
+    c = ax.hexbin(x1, x2, gridsize=20, C=e[:], mincnt=1, vmin=e.mean() - .1)
     fig.colorbar(c, ax=ax)
     ax.set_title(f'Empowerment Landscape, ep = {ep}')
     ax.set_xlabel('x at dim=0')
     ax.set_ylabel('x at dim=1')
-    plt.savefig(f'img/empowerment_landscape{args}.png')
+    plt.savefig(f'img/empowerment_landscape.png')
     plt.close()
+
 
 
 def visualize_distributions_2D(empowerment, bayes_filter, replay_memory):
