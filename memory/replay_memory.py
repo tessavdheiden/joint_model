@@ -58,6 +58,7 @@ class ReplayMemory():
                 action = self.env.action_space.sample()
                 u_trial[t - 1] = action
                 step_info = self.env.step(action)
+                self.env.render()
                 x_trial[t] = np.squeeze(step_info[0])
 
             # Divide into subsequences

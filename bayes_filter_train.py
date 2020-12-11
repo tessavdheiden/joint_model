@@ -15,7 +15,8 @@ from envs.env_pendulum import PendulumEnv
 from envs.env_ball_box import BallBoxEnv
 from envs.env_sigmoid import SigmoidEnv
 from envs.env_sigmoid2d import Sigmoid2DEnv
-from envs.env_acrobot import AcrobotEnv
+from envs.env_reacher import ReacherEnv
+from envs.env_arm import ArmEnv
 from filters.bayes_filter_viz import visualize_latent_space3D, visualize_latent_space2D, visualize_latent_space1D, \
                                 visualize_latent_spaceND, plot_trajectory
 
@@ -49,7 +50,7 @@ def train(replay_memory, bayes_filter):
                 elif bayes_filter.z_dim == 3:
                     visualize_latent_space3D(bayes_filter, replay_memory, i)
                 else:
-                    visualize_latent_spaceND(bayes_filter, replay_memory)
+                    visualize_latent_spaceND(bayes_filter, replay_memory, i)
 
                 plot_trajectory(bayes_filter, replay_memory, i)
             bayes_filter.prepare_update()
@@ -83,11 +84,11 @@ parser.add_argument('--n_trials', type=int, default=2000,
 parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
 parser.add_argument('--n_subseq', type=int, default=4,
                     help='number of subsequences to divide each sequence into')
-parser.add_argument('--env', type=int, default=4,
-                    help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d, 4=acrobot')
-parser.add_argument('--filter_type', type=int, default=0,
+parser.add_argument('--env', type=int, default=5,
+                    help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d, 4=reacher, 5=arm')
+parser.add_argument('--filter_type', type=int, default=1,
                     help='0=bayes filter, 1=bayes filter fully connected, 3=filter simple')
-parser.add_argument('--z_dim', type=int, default=3)
+parser.add_argument('--z_dim', type=int, default=11)
 args = parser.parse_args()
 
 
@@ -109,7 +110,9 @@ if __name__ == '__main__':
     elif args.env == 3:
         env = Sigmoid2DEnv()
     elif args.env == 4:
-        env = AcrobotEnv()
+        env = ReacherEnv()
+    elif args.env == 5:
+        env = ArmEnv()
     env.seed(0)
 
     controller = Controller(env)
@@ -122,5 +125,6 @@ if __name__ == '__main__':
         bayes_filter = SimpleFilter.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=args.z_dim)
 
     assert bayes_filter.z_dim <= replay_memory.state_dim
+
 
     train(replay_memory, bayes_filter)

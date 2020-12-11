@@ -1,131 +1,280 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.distributions import Normal
-from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
-import torch.optim as optim
+"""
+Environment is a Robot Arm. The arm tries to get to the blue point.
+The environment will return a geographic (distance) information for the arm to learn.
+The far away from blue point the less reward; touch blue r+=1; stop at blue for a while then get r=+10.
+
+You can train this RL by using LOAD = False, after training, this model will be store in the a local folder.
+Using LOAD = True to reload the trained model for playing.
+You can customize this script in a way you want.
+View more on [莫烦Python] : https://morvanzhou.github.io/tutorials/
+Requirement:
+pyglet >= 1.2.4
+numpy >= 1.12.1
+tensorflow >= 1.0.1
+"""
+
+import tensorflow as tf
+import numpy as np
+import os
+import shutil
+import matplotlib.pyplot as plt
+from envs.env_arm import ArmEnv
+
+np.random.seed(1)
+tf.random.set_seed(1)
+
+MAX_EPISODES = 600
+MAX_EP_STEPS = 200
+LR_A = 1e-4  # learning rate for actor
+LR_C = 1e-4  # learning rate for critic
+GAMMA = 0.9  # reward discount
+REPLACE_ITER_A = 1100
+REPLACE_ITER_C = 1000
+MEMORY_CAPACITY = 5000
+BATCH_SIZE = 16
+VAR_MIN = 0.1
+RENDER = True
+LOAD = False
+MODE = ['easy', 'hard']
+n_model = 1
+
+env = ArmEnv(mode=MODE[n_model])
+STATE_DIM = env.state_dim
+ACTION_DIM = env.action_dim
+ACTION_BOUND = env.action_bound
+tf.compat.v1.disable_eager_execution()
+# all placeholder for tf
+with tf.name_scope('S'):
+    S = tf.compat.v1.placeholder(tf.float32, shape=[None, STATE_DIM], name='s')
+with tf.name_scope('R'):
+    R = tf.compat.v1.placeholder(tf.float32, [None, 1], name='r')
+with tf.name_scope('S_'):
+    S_ = tf.compat.v1.placeholder(tf.float32, shape=[None, STATE_DIM], name='s_')
 
 
-class ActorNet(nn.Module):
+class Actor(object):
+    def __init__(self, sess, action_dim, action_bound, learning_rate, t_replace_iter):
+        self.sess = sess
+        self.a_dim = action_dim
+        self.action_bound = action_bound
+        self.lr = learning_rate
+        self.t_replace_iter = t_replace_iter
+        self.t_replace_counter = 0
 
-    def __init__(self):
-        super(ActorNet, self).__init__()
-        self.fc = nn.Linear(3, 100)
-        self.mu_head = nn.Linear(100, 1)
-        self.sigma_head = nn.Linear(100, 1)
+        with tf.compat.v1.variable_scope('Actor'):
+            # input s, output a
+            self.a = self._build_net(S, scope='eval_net', trainable=True)
 
-    def forward(self, x):
-        x = F.relu(self.fc(x))
-        mu = 2.0 * F.tanh(self.mu_head(x))
-        sigma = F.softplus(self.sigma_head(x))
-        return (mu, sigma)
+            # input s_, output a, get a_ for critic
+            self.a_ = self._build_net(S_, scope='target_net', trainable=False)
 
+        self.e_params = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.GLOBAL_VARIABLES, scope='Actor/eval_net')
+        self.t_params = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.GLOBAL_VARIABLES, scope='Actor/target_net')
+        self.replace = [tf.compat.v1.assign(t, e) for t, e in zip(self.t_params, self.e_params)]
 
-class CriticNet(nn.Module):
+    def _build_net(self, s, scope, trainable):
+        with tf.compat.v1.variable_scope(scope):
+            init_w = tf.initializers.GlorotUniform()
+            init_b = tf.compat.v1.constant_initializer(0.001)
+            net = tf.compat.v1.layers.dense(s, 200, activation=tf.nn.relu6,
+                                  kernel_initializer=init_w, bias_initializer=init_b, name='l1',
+                                  trainable=trainable)
+            net = tf.compat.v1.layers.dense(net, 200, activation=tf.nn.relu6,
+                                  kernel_initializer=init_w, bias_initializer=init_b, name='l2',
+                                  trainable=trainable)
+            net = tf.compat.v1.layers.dense(net, 10, activation=tf.nn.relu,
+                                  kernel_initializer=init_w, bias_initializer=init_b, name='l3',
+                                  trainable=trainable)
+            with tf.compat.v1.variable_scope('a'):
+                actions = tf.compat.v1.layers.dense(net, self.a_dim, activation=tf.nn.tanh, kernel_initializer=init_w,
+                                          name='a', trainable=trainable)
+                scaled_a = tf.multiply(actions, self.action_bound,
+                                       name='scaled_a')  # Scale output to -action_bound to action_bound
+        return scaled_a
 
-    def __init__(self):
-        super(CriticNet, self).__init__()
-        self.fc = nn.Linear(3, 100)
-        self.v_head = nn.Linear(100, 1)
+    def learn(self, s):  # batch update
+        self.sess.run(self.train_op, feed_dict={S: s})
+        if self.t_replace_counter % self.t_replace_iter == 0:
+            self.sess.run(self.replace)
+        self.t_replace_counter += 1
 
-    def forward(self, x):
-        x = F.relu(self.fc(x))
-        state_value = self.v_head(x)
-        return state_value
+    def choose_action(self, s):
+        s = s[np.newaxis, :]  # single state
+        return self.sess.run(self.a, feed_dict={S: s})[0]  # single action
 
+    def add_grad_to_graph(self, a_grads):
+        with tf.compat.v1.variable_scope('policy_grads'):
+            self.policy_grads = tf.gradients(ys=self.a, xs=self.e_params, grad_ys=a_grads)
 
-class Policy(object):
-    clip_param = 0.2
-    max_grad_norm = 0.5
-    ppo_epoch = 10
-    buffer_capacity, batch_size = 1000, 32
-
-    def __init__(self):
-        self.training_step = 0
-        self.anet = ActorNet().float()
-        self.cnet = CriticNet().float()
-        self.buffer = []
-        self.counter = 0
-
-        self.optimizer_a = optim.Adam(self.anet.parameters(), lr=1e-4)
-        self.optimizer_c = optim.Adam(self.cnet.parameters(), lr=3e-4)
-
-    def select_action(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0)
-        with torch.no_grad():
-            (mu, sigma) = self.anet(state)
-        dist = Normal(mu, sigma)
-        action = dist.sample()
-        action_log_prob = dist.log_prob(action)
-        action.clamp(-2.0, 2.0)
-        return action, action_log_prob
-
-    def get_value(self, state):
-
-        state = torch.from_numpy(state).float().unsqueeze(0)
-        with torch.no_grad():
-            state_value = self.cnet(state)
-        return state_value.item()
-
-    def save_param(self):
-        torch.save(self.anet.state_dict(), 'param/ppo_anet_params.pkl')
-        torch.save(self.cnet.state_dict(), 'param/ppo_cnet_params.pkl')
-
-    def store(self, transition):
-        self.buffer.append(transition)
-        self.counter += 1
-        return self.counter % self.buffer_capacity == 0
-
-    def update(self, gamma=.9):
-        self.training_step += 1
-
-        s = torch.tensor([t.s for t in self.buffer], dtype=torch.float)
-        a = torch.tensor([t.a for t in self.buffer], dtype=torch.float).view(-1, 1)
-        r = torch.tensor([t.r for t in self.buffer], dtype=torch.float).view(-1, 1)
-        s_ = torch.tensor([t.s_ for t in self.buffer], dtype=torch.float)
-
-        old_action_log_probs = torch.tensor(
-            [t.a_log_p for t in self.buffer], dtype=torch.float).view(-1, 1)
-
-        r = (r - r.mean()) / (r.std() + 1e-5)
-        with torch.no_grad():
-            target_v = r + gamma * self.cnet(s_)
-
-        adv = (target_v - self.cnet(s)).detach()
-
-        for _ in range(self.ppo_epoch):
-            for index in BatchSampler(
-                    SubsetRandomSampler(range(self.buffer_capacity)), self.batch_size, False):
-                (mu, sigma) = self.anet(s[index])
-                dist = Normal(mu, sigma)
-                action_log_probs = dist.log_prob(a[index])
-                ratio = torch.exp(action_log_probs - old_action_log_probs[index])
-
-                surr1 = ratio * adv[index]
-                surr2 = torch.clamp(ratio, 1.0 - self.clip_param,
-                                    1.0 + self.clip_param) * adv[index]
-                action_loss = -torch.min(surr1, surr2).mean()
-
-                self.optimizer_a.zero_grad()
-                action_loss.backward()
-                nn.utils.clip_grad_norm_(self.anet.parameters(), self.max_grad_norm)
-                self.optimizer_a.step()
-
-                value_loss = F.smooth_l1_loss(self.cnet(s[index]), target_v[index])
-                self.optimizer_c.zero_grad()
-                value_loss.backward()
-                nn.utils.clip_grad_norm_(self.cnet.parameters(), self.max_grad_norm)
-                self.optimizer_c.step()
-
-        del self.buffer[:]
-
-    def save_params(self, path='net_params.pkl'):
-        torch.save(self.net.state_dict(), path)
+        with tf.compat.v1.variable_scope('A_train'):
+            opt = tf.compat.v1.train.RMSPropOptimizer(-self.lr)  # (- learning rate) for ascent policy
+            self.train_op = opt.apply_gradients(zip(self.policy_grads, self.e_params))
 
 
+class Critic(object):
+    def __init__(self, sess, state_dim, action_dim, learning_rate, gamma, t_replace_iter, a, a_):
+        self.sess = sess
+        self.s_dim = state_dim
+        self.a_dim = action_dim
+        self.lr = learning_rate
+        self.gamma = gamma
+        self.t_replace_iter = t_replace_iter
+        self.t_replace_counter = 0
+
+        with tf.compat.v1.variable_scope('Critic'):
+            # Input (s, a), output q
+            self.a = a
+            self.q = self._build_net(S, self.a, 'eval_net', trainable=True)
+
+            # Input (s_, a_), output q_ for q_target
+            self.q_ = self._build_net(S_, a_, 'target_net',
+                                      trainable=False)  # target_q is based on a_ from Actor's target_net
+
+            self.e_params = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.GLOBAL_VARIABLES, scope='Critic/eval_net')
+            self.t_params = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.GLOBAL_VARIABLES, scope='Critic/target_net')
+
+        with tf.compat.v1.variable_scope('target_q'):
+            self.target_q = R + self.gamma * self.q_
+
+        with tf.compat.v1.variable_scope('TD_error'):
+            self.loss = tf.reduce_mean(tf.compat.v1.squared_difference(self.target_q, self.q))
+
+        with tf.compat.v1.variable_scope('C_train'):
+            self.train_op = tf.compat.v1.train.RMSPropOptimizer(self.lr).minimize(self.loss)
+
+        with tf.compat.v1.variable_scope('a_grad'):
+            self.a_grads = tf.gradients(self.q, a)[0]  # tensor of gradients of each sample (None, a_dim)
+        self.replace = [tf.compat.v1.assign(t, e) for t, e in zip(self.t_params, self.e_params)]
+
+    def _build_net(self, s, a, scope, trainable):
+        with tf.compat.v1.variable_scope(scope):
+            init_w = tf.initializers.GlorotUniform()
+            init_b = tf.constant_initializer(0.01)
+
+            with tf.compat.v1.variable_scope('l1'):
+                n_l1 = 200
+                w1_s = tf.compat.v1.get_variable('w1_s', [self.s_dim, n_l1], initializer=init_w, trainable=trainable)
+                w1_a = tf.compat.v1.get_variable('w1_a', [self.a_dim, n_l1], initializer=init_w, trainable=trainable)
+                b1 = tf.compat.v1.get_variable('b1', [1, n_l1], initializer=init_b, trainable=trainable)
+                net = tf.nn.relu6(tf.matmul(s, w1_s) + tf.matmul(a, w1_a) + b1)
+            net = tf.compat.v1.layers.dense(net, 200, activation=tf.nn.relu6,
+                                  kernel_initializer=init_w, bias_initializer=init_b, name='l2',
+                                  trainable=trainable)
+            net = tf.compat.v1.layers.dense(net, 10, activation=tf.nn.relu,
+                                  kernel_initializer=init_w, bias_initializer=init_b, name='l3',
+                                  trainable=trainable)
+            with tf.compat.v1.variable_scope('q'):
+                q = tf.compat.v1.layers.dense(net, 1, kernel_initializer=init_w, bias_initializer=init_b,
+                                    trainable=trainable)  # Q(s,a)
+        return q
+
+    def learn(self, s, a, r, s_):
+        self.sess.run(self.train_op, feed_dict={S: s, self.a: a, R: r, S_: s_})
+        if self.t_replace_counter % self.t_replace_iter == 0:
+            self.sess.run(self.replace)
+        self.t_replace_counter += 1
 
 
+class Memory(object):
+    def __init__(self, capacity, dims):
+        self.capacity = capacity
+        self.data = np.zeros((capacity, dims))
+        self.pointer = 0
+
+    def store_transition(self, s, a, r, s_):
+        transition = np.hstack((s, a, [r], s_))
+        index = self.pointer % self.capacity  # replace the old memory with new memory
+        self.data[index, :] = transition
+        self.pointer += 1
+
+    def sample(self, n):
+        assert self.pointer >= self.capacity, 'Memory has not been fulfilled'
+        indices = np.random.choice(self.capacity, size=n)
+        return self.data[indices, :]
 
 
+sess = tf.compat.v1.Session()
+
+# Create actor and critic.
+actor = Actor(sess, ACTION_DIM, ACTION_BOUND[1], LR_A, REPLACE_ITER_A)
+critic = Critic(sess, STATE_DIM, ACTION_DIM, LR_C, GAMMA, REPLACE_ITER_C, actor.a, actor.a_)
+actor.add_grad_to_graph(critic.a_grads)
+
+M = Memory(MEMORY_CAPACITY, dims=2 * STATE_DIM + ACTION_DIM + 1)
+
+saver = tf.compat.v1.train.Saver()
+path = './' + MODE[n_model]
+
+if LOAD:
+    saver.restore(sess, tf.train.latest_checkpoint(path))
+else:
+    sess.run(tf.compat.v1.global_variables_initializer())
 
 
+def train():
+    var = 2.  # control exploration
+    rewards = []
+    for ep in range(MAX_EPISODES):
+        s = env.reset()
+        ep_reward = 0
+
+        for t in range(MAX_EP_STEPS):
+            # while True:
+            if RENDER:
+                env.render()
+
+            # Added exploration noise
+            a = actor.choose_action(s)
+            a = np.clip(np.random.normal(a, var), -ACTION_BOUND, ACTION_BOUND)  # add randomness to action selection for exploration
+            s_, r, done = env.step(a)
+            M.store_transition(s, a, r, s_)
+
+            if M.pointer > MEMORY_CAPACITY:
+                var = max([var * .9999, VAR_MIN])  # decay the action randomness
+                b_M = M.sample(BATCH_SIZE)
+                b_s = b_M[:, :STATE_DIM]
+                b_a = b_M[:, STATE_DIM: STATE_DIM + ACTION_DIM]
+                b_r = b_M[:, -STATE_DIM - 1: -STATE_DIM]
+                b_s_ = b_M[:, -STATE_DIM:]
+
+                critic.learn(b_s, b_a, b_r, b_s_)
+                actor.learn(b_s)
+
+            s = s_
+            ep_reward += r
+
+            if t == MAX_EP_STEPS - 1 or done:
+                # if done:
+                result = '| done' if done else '| ----'
+                print('Ep:', ep,
+                      result,
+                      '| R: %i' % int(ep_reward),
+                      '| Explore: %.2f' % var,
+                      )
+                break
+        rewards.append(ep_reward)
+    if os.path.isdir(path): shutil.rmtree(path)
+    os.mkdir(path)
+    ckpt_path = os.path.join('./' + MODE[n_model], 'DDPG.ckpt')
+    save_path = saver.save(sess, ckpt_path, write_meta_graph=False)
+    print("\nSave Model %s\n" % save_path)
+    plt.scatter(np.arange(len(rewards)), rewards)
+    plt.savefig('img/reward_policy.png')
+
+
+def eval():
+    env.set_fps(30)
+    s = env.reset()
+    while True:
+        if RENDER:
+            env.render()
+        a = actor.choose_action(s)
+        s_, r, done = env.step(a)
+        s = s_
+
+
+if __name__ == '__main__':
+    if LOAD:
+        eval()
+    else:
+        train()

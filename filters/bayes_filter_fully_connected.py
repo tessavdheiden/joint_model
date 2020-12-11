@@ -15,7 +15,10 @@ class BayesFilterFullyConnected(nn.Module):
         self.T = seq_length
         self.x_dim = x_dim
         self.u_dim = u_dim
-        self.u_max = u_max
+        if type(u_max) == float:
+            self.u_max = u_max
+        else:
+            self.u_max = torch.from_numpy(u_max)
         self.z_dim = z_dim
         self.w_dim = z_dim
         self.h_dim = 128
@@ -101,7 +104,7 @@ class BayesFilterFullyConnected(nn.Module):
         return x_pred, w_dists, z_pred, x_dists
 
     def forward(self, z, u, x=None):
-        u = torch.clamp(u, min=-self.u_max, max=self.u_max)
+        u = torch.clamp(u, min=-self.u_max, max=self.u_max) if u.shape[1] == 1 else torch.max(torch.min(u, self.u_max), -self.u_max)
 
         input = torch.cat((z, u), dim=1)
         trans = self.q_trans(input)

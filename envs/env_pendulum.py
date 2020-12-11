@@ -6,7 +6,7 @@ import torch
 
 from os import path
 
-MASS = 1.
+MASS = 2.
 DELTA_T = .05
 MAX_TORQUE = 1.
 

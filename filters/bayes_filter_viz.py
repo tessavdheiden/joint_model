@@ -179,35 +179,54 @@ def visualize_latent_space1D(bayes_filter, replay_memory):
     plt.savefig(f"img/latent_space.png")
 
 
-def visualize_latent_spaceND(bayes_filter, replay_memory):
+def visualize_latent_spaceND(bayes_filter, replay_memory, ep=-1):
     replay_memory.reset_batchptr_val()
-    x, z = [], []
+    x, z, z0 = [], [], []
     for b in range(replay_memory.n_batches_val):
         batch_dict = replay_memory.next_batch_val()
         x_in = torch.from_numpy(batch_dict["states"])[:, :bayes_filter.T]
         u_in = torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1]
         x.append(x_in)
         x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
-        z.append(z_out)
+        z.append(z_out[:, 1:])
+        z0.append(z_out[:, 0])
 
     x = torch.cat(x, dim=0)
     z = torch.cat(z, dim=0)
-    x = x.numpy().reshape(replay_memory.n_batches_val * replay_memory.batch_size * bayes_filter.T, -1)
-    z = z.detach().numpy().reshape(replay_memory.n_batches_val * replay_memory.batch_size * bayes_filter.T, -1)
-
-    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(3, 3))
+    z0 = torch.cat(z0, dim=0)
+    z = z.detach().numpy().reshape(-1, bayes_filter.z_dim)
+    z0 = z0.detach().numpy().reshape(-1, bayes_filter.z_dim)
 
     assert bayes_filter.z_dim == z.shape[1]
 
-    pca = PCA(n_components=2)
+    pca = PCA(n_components=3)
     pca.fit(z)
     z = pca.transform(z)
 
-    ax.scatter(z[:, 0], z[:, 1], marker='.')
-    ax.set_xlabel('latent z at dim=0')
-    ax.set_ylabel('latent z at dim=1')
-    ax.axis('equal')
-    plt.tight_layout()
+    fig, ax = plt.subplots(ncols=3, nrows=2, figsize=(10, 6), subplot_kw=dict(projection='3d'))
+
+    degrees = np.linspace(0, 80, 3)
+
+    for i in range(3):
+        ax[0, i].scatter(z[:, 0], z[:, 1], z[:, 2], marker='.')
+        ax[0, i].set_xlabel('$z_0$')
+        ax[0, i].set_ylabel('$z_1$')
+        ax[0, i].set_zlabel('$z_2$')
+        ax[0, i].axis('auto')
+        ax[0, i].view_init(30, degrees[i])
+        ax[0, i].set_title(f'angle {degrees[i]:.0f}')
+
+    for i in range(3):
+        ax[1, i].scatter(z0[:, 0], z0[:, 1], z0[:, 2], marker='.')
+        ax[1, i].set_xlabel('$z_0$')
+        ax[1, i].set_ylabel('$z_1$')
+        ax[1, i].set_zlabel('$z_2$')
+        ax[1, i].axis('auto')
+        ax[1, i].view_init(30, degrees[i])
+        ax[1, i].set_title(f'angle {degrees[i]:.0f}')
+
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.suptitle(f'Latent Space, ep = {ep}')
     plt.savefig(f"img/latent_space.png")
 
 
@@ -237,12 +256,13 @@ def plot_trajectory(bayes_filter, replay_memory, ep=-1):
         x_hat = x_hat.detach().numpy()
         x_pred = x_pred.detach().numpy()
         x = x.detach().numpy()
+
+
         for i in range(replay_memory.batch_size):
             c = next(axc._get_lines.prop_cycler)['color']
 
             for dim in range(x_hat.shape[2]):
                 ax[dim].plot(t, x_hat[i, :, dim], linestyle='--', color=c, label='dvbf trans')
-                #ax[dim].plot(t, x_pred[i, :, dim], linestyle=':', color=c, label='dvbf prop')
                 ax[dim].plot(t, x[i, :, dim], color=c, label='true')
                 ax[dim].set_xlabel('time')
                 ax[dim].set_ylabel(f'x at dim={dim}')
