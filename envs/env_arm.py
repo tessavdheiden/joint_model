@@ -35,7 +35,7 @@ class ArmEnv(gym.Env):
         self.mode = mode
         self.action_space = spaces.Box(low=self.action_bound, high=self.action_bound)
         self.observation_space = spaces.Box(low=np.zeros(self.state_dim), high=np.ones(self.state_dim))
-        self.arm_info = np.zeros((2, 3))
+        self.arm_info = np.zeros((6))
         self.point_info = np.array([250, 303])
         self.point_info_init = self.point_info.copy()
         self.center_coord = np.array(self.viewer_xy)/2
@@ -43,15 +43,15 @@ class ArmEnv(gym.Env):
     def is_collision(self, p1, p2):
         delta_pos = p1 - p2
         dist = np.sqrt(np.sum(np.square(delta_pos)))
-        dist_min = self.bar_thc * 2
+        dist_min = self.bar_thc * 3
         return True if dist < dist_min else False
 
     def step(self, action):
         # action = (node1 angular v, node2 angular v)
         action = np.clip(action, -self.action_bound, self.action_bound)
 
-        arm1rad = self.arm_info[0, 0]
-        arm2rad = self.arm_info[1, 0]
+        arm1rad = self.arm_info[0]
+        arm2rad = self.arm_info[3]
 
         arm1rad += action[0] * self.dt
         arm2rad += action[1] * self.dt
@@ -59,10 +59,11 @@ class ArmEnv(gym.Env):
         arm1dx_dy = np.array([self.arm1l * np.cos(arm1rad), self.arm1l * np.sin(arm1rad)])
         arm2dx_dy = np.array([self.arm2l * np.cos(arm2rad), self.arm2l * np.sin(arm2rad)])
         arm1xy = self.center_coord + arm1dx_dy  # (x1, y1)
-        arm2xy = self.arm_info[0, 1:3] + arm2dx_dy  # (x2, y2)
-        self.arm_info[0, 0:3] = np.hstack([arm1rad, arm1xy[0], arm1xy[1]])
+        arm2xy = self.arm_info[1:3] + arm2dx_dy  # (x2, y2)
+
         if not self.is_collision(arm2xy, self.center_coord):
-            self.arm_info[1, 0:3] = np.hstack([arm2rad, arm2xy[0], arm2xy[1]])
+            self.arm_info[:3] = np.hstack([arm1rad, arm1xy[0], arm1xy[1]])
+            self.arm_info[-3:] = np.hstack([arm2rad, arm2xy[0], arm2xy[1]])
 
         s, arm2_distance = self._get_state()
         r = self._r_func(arm2_distance)
@@ -71,12 +72,12 @@ class ArmEnv(gym.Env):
 
     def _reset_arm(self):
         arm1rad, arm2rad = np.random.rand(2) * np.pi * 2
-        self.arm_info[0, 0] = arm1rad
-        self.arm_info[1, 0] = arm2rad
+        self.arm_info[0] = arm1rad
+        self.arm_info[3] = arm2rad
         arm1dx_dy = np.array([self.arm1l * np.cos(arm1rad), self.arm1l * np.sin(arm1rad)])
         arm2dx_dy = np.array([self.arm2l * np.cos(arm2rad), self.arm2l * np.sin(arm2rad)])
-        self.arm_info[0, 1:3] = self.center_coord + arm1dx_dy  # (x1, y1)
-        self.arm_info[1, 1:3] = self.arm_info[0, 1:3] + arm2dx_dy  # (x2, y2)
+        self.arm_info[1:3] = self.center_coord + arm1dx_dy  # (x1, y1)
+        self.arm_info[4:6] = self.arm_info[1:3] + arm2dx_dy  # (x2, y2)
 
     def reset(self):
         self.get_point = False
@@ -89,7 +90,7 @@ class ArmEnv(gym.Env):
             self.point_info[:] = self.point_info_init
 
         self._reset_arm()
-        while self.is_collision(self.arm_info[1, -2:], self.center_coord):
+        while self.is_collision(self.arm_info[-2:], self.center_coord):
             self._reset_arm()
 
         return self._get_state()[0]
@@ -107,7 +108,7 @@ class ArmEnv(gym.Env):
 
     def _get_state(self):
         # return the distance (dx, dy) between arm finger point with blue point
-        arm_end = np.vstack([self.arm_info[0, 1:3], self.arm_info[1, 1:3]])
+        arm_end = np.vstack([self.arm_info[1:3], self.arm_info[4:6]])
         t_arms = np.ravel(arm_end - self.point_info)
         center_dis = (self.center_coord - self.point_info)/200
         in_point = 1 if self.grab_counter > 0 else 0
@@ -178,9 +179,9 @@ class Viewer(pyglet.window.Window):
                      self.point_info[0] - point_l, self.point_info[1] + point_l)
         self.point.vertices = point_box
 
-        arm1_coord = (*self.center_coord, *(self.arm_info[0, 1:3]))  # (x0, y0, x1, y1)
-        arm2_coord = (*(self.arm_info[0, 1:3]), *(self.arm_info[1, 1:3]))  # (x1, y1, x2, y2)
-        arm1_thick_rad = np.pi / 2 - self.arm_info[0, 0]
+        arm1_coord = (*self.center_coord, *(self.arm_info[1:3]))  # (x0, y0, x1, y1)
+        arm2_coord = (*(self.arm_info[1:3]), *(self.arm_info[4:6]))  # (x1, y1, x2, y2)
+        arm1_thick_rad = np.pi / 2 - self.arm_info[0]
         x01, y01 = arm1_coord[0] - np.cos(arm1_thick_rad) * self.bar_thc, arm1_coord[1] + np.sin(
             arm1_thick_rad) * self.bar_thc
         x02, y02 = arm1_coord[0] + np.cos(arm1_thick_rad) * self.bar_thc, arm1_coord[1] - np.sin(
@@ -190,7 +191,7 @@ class Viewer(pyglet.window.Window):
         x12, y12 = arm1_coord[2] - np.cos(arm1_thick_rad) * self.bar_thc, arm1_coord[3] + np.sin(
             arm1_thick_rad) * self.bar_thc
         arm1_box = (x01, y01, x02, y02, x11, y11, x12, y12)
-        arm2_thick_rad = np.pi / 2 - self.arm_info[1, 0]
+        arm2_thick_rad = np.pi / 2 - self.arm_info[3]
         x11_, y11_ = arm2_coord[0] + np.cos(arm2_thick_rad) * self.bar_thc, arm2_coord[1] - np.sin(
             arm2_thick_rad) * self.bar_thc
         x12_, y12_ = arm2_coord[0] - np.cos(arm2_thick_rad) * self.bar_thc, arm2_coord[1] + np.sin(
@@ -205,16 +206,16 @@ class Viewer(pyglet.window.Window):
 
     def on_key_press(self, symbol, modifiers):
         if symbol == pyglet.window.key.UP:
-            self.arm_info[0, 0] += .1
+            self.arm_info[0] += .1
             print(self.arm_info[:, 1:3] - self.point_info)
         elif symbol == pyglet.window.key.DOWN:
-            self.arm_info[0, 0] -= .1
+            self.arm_info[0] -= .1
             print(self.arm_info[:, 1:3] - self.point_info)
         elif symbol == pyglet.window.key.LEFT:
-            self.arm_info[1, 0] += .1
+            self.arm_info[3] += .1
             print(self.arm_info[:, 1:3] - self.point_info)
         elif symbol == pyglet.window.key.RIGHT:
-            self.arm_info[1, 0] -= .1
+            self.arm_info[3] -= .1
             print(self.arm_info[:, 1:3] - self.point_info)
         elif symbol == pyglet.window.key.Q:
             pyglet.clock.set_fps_limit(1000)
