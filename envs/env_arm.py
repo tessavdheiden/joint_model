@@ -40,30 +40,29 @@ class ArmEnv(gym.Env):
         self.point_info_init = self.point_info.copy()
         self.center_coord = np.array(self.viewer_xy)/2
 
-    def is_collision(self):
-        delta_pos = self.arm_info[1, 1:3] - self.center_coord
+    def is_collision(self, p1, p2):
+        delta_pos = p1 - p2
         dist = np.sqrt(np.sum(np.square(delta_pos)))
         dist_min = self.bar_thc * 2
         return True if dist < dist_min else False
 
-
     def step(self, action):
         # action = (node1 angular v, node2 angular v)
         action = np.clip(action, -self.action_bound, self.action_bound)
-        arm_info = self.arm_info.copy()
-        self.arm_info[:, 0] += action * self.dt
-        #self.arm_info[:, 1] %= np.pi * 2
 
         arm1rad = self.arm_info[0, 0]
         arm2rad = self.arm_info[1, 0]
 
+        arm1rad += action[0] * self.dt
+        arm2rad += action[1] * self.dt
+
         arm1dx_dy = np.array([self.arm1l * np.cos(arm1rad), self.arm1l * np.sin(arm1rad)])
         arm2dx_dy = np.array([self.arm2l * np.cos(arm2rad), self.arm2l * np.sin(arm2rad)])
-        self.arm_info[0, 1:3] = self.center_coord + arm1dx_dy  # (x1, y1)
-        self.arm_info[1, 1:3] = self.arm_info[0, 1:3] + arm2dx_dy  # (x2, y2)
-
-        if self.is_collision():
-            self.arm_info[:] = arm_info
+        arm1xy = self.center_coord + arm1dx_dy  # (x1, y1)
+        arm2xy = self.arm_info[0, 1:3] + arm2dx_dy  # (x2, y2)
+        self.arm_info[0, 0:3] = np.hstack([arm1rad, arm1xy[0], arm1xy[1]])
+        if not self.is_collision(arm2xy, self.center_coord):
+            self.arm_info[1, 0:3] = np.hstack([arm2rad, arm2xy[0], arm2xy[1]])
 
         s, arm2_distance = self._get_state()
         r = self._r_func(arm2_distance)
@@ -90,7 +89,7 @@ class ArmEnv(gym.Env):
             self.point_info[:] = self.point_info_init
 
         self._reset_arm()
-        while self.is_collision():
+        while self.is_collision(self.arm_info[1, -2:], self.center_coord):
             self._reset_arm()
 
         return self._get_state()[0]
@@ -108,7 +107,7 @@ class ArmEnv(gym.Env):
 
     def _get_state(self):
         # return the distance (dx, dy) between arm finger point with blue point
-        arm_end = self.arm_info[:, 1:3]
+        arm_end = np.vstack([self.arm_info[0, 1:3], self.arm_info[1, 1:3]])
         t_arms = np.ravel(arm_end - self.point_info)
         center_dis = (self.center_coord - self.point_info)/200
         in_point = 1 if self.grab_counter > 0 else 0
