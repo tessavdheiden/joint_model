@@ -38,7 +38,10 @@ class Empowerment(nn.Module):
         self.h_dim = 128
         self.action_dim = controller.action_space.shape[0]
         self.transition = transition_network
-        self.z_dim = transition_network.z_dim
+        if use_filter:
+            self.z_dim = transition_network.z_dim
+        else:
+            self.z_dim = env.observation_space.shape[0]
 
         self.env = env
         self.source = Net(self.z_dim, self.action_dim, self.h_dim)

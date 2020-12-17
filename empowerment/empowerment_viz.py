@@ -105,7 +105,7 @@ def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_
             e_out = empowerment(x_in.view(-1, x_in.shape[2]))
         e.append(e_out)
 
-    x = torch.cat(x, dim=0).numpy().reshape(-1, bayes_filter.x_dim)
+    x = torch.cat(x, dim=0).numpy().reshape(-1, replay_memory.state_dim)
     e = torch.cat(e, dim=0).numpy().reshape(-1)
     if args.env == 0:
         x1 = np.arctan2(x[:, 1], x[:, 0])

@@ -10,6 +10,7 @@ import numpy as np
 import pyglet
 import gym
 from gym import spaces
+import torch
 
 #pyglet.clock.set_fps_limit(10000)
 
@@ -59,7 +60,7 @@ class ArmEnv(gym.Env):
         arm1dx_dy = np.array([self.arm1l * np.cos(arm1rad), self.arm1l * np.sin(arm1rad)])
         arm2dx_dy = np.array([self.arm2l * np.cos(arm2rad), self.arm2l * np.sin(arm2rad)])
         arm1xy = self.center_coord + arm1dx_dy  # (x1, y1)
-        arm2xy = self.arm_info[1:3] + arm2dx_dy  # (x2, y2)
+        arm2xy = arm1xy + arm2dx_dy  # (x2, y2)
 
         if not self.is_collision(arm2xy, self.center_coord):
             self.arm_info[:3] = np.hstack([arm1rad, arm1xy[0], arm1xy[1]])
@@ -69,6 +70,44 @@ class ArmEnv(gym.Env):
         r = self._r_func(arm2_distance)
 
         return s, r, self.get_point
+
+    def step_batch(self, x, u):
+        def is_collision(p1, p2):
+            batch_size = p1.shape[0]
+            dist_min = torch.ones(batch_size) * self.bar_thc * 3
+
+            delta_pos = p1 - p2
+            dist = torch.sqrt(torch.sum((delta_pos ** 2), dim=-1))
+
+            return dist < dist_min
+
+
+        batch_size = u.shape[0]
+        center_coord = torch.from_numpy(self.center_coord).unsqueeze(0).repeat(batch_size, 1)
+        center_coord = center_coord.type(x.type())
+
+        # action = (node1 angular v, node2 angular v)
+        u = torch.clamp(u, -self.action_bound[0], self.action_bound[1])
+
+        arm1rad = x[:, 0]
+        arm2rad = x[:, 3]
+
+        arm1rad = arm1rad + u[:, 0] * self.dt
+        arm2rad = arm2rad + u[:, 1] * self.dt
+
+        arm1rad = arm1rad.view(-1, 1)
+        arm2rad = arm2rad.view(-1, 1)
+
+        arm1dx_dy = torch.cat([self.arm1l * torch.cos(arm1rad), self.arm1l * torch.sin(arm1rad)], dim=-1)
+        arm2dx_dy = torch.cat([self.arm2l * torch.cos(arm2rad), self.arm2l * torch.sin(arm2rad)], dim=-1)
+        arm1xy = center_coord + arm1dx_dy  # (x1, y1)
+        arm2xy = arm1xy + arm2dx_dy  # (x2, y2)
+
+        in_col = is_collision(arm2xy, center_coord)
+        new_arm = torch.cat([arm1rad, arm1xy[:, 0:2], arm2rad, arm2xy[:, 0:2]], dim=-1)
+        new_arm[in_col, :] = x[in_col, :]
+
+        return new_arm
 
     def _reset_arm(self):
         arm1rad, arm2rad = np.random.rand(2) * np.pi * 2
