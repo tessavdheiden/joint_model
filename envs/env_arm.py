@@ -18,7 +18,7 @@ import torch
 class ArmEnv(gym.Env):
     action_bound = np.array([1, 1])
     action_dim = 2
-    state_dim = 6
+    state_dim = 8
     dt = .1  # refresh rate
     arm1l = 100
     arm2l = 100
@@ -36,7 +36,7 @@ class ArmEnv(gym.Env):
         self.mode = mode
         self.action_space = spaces.Box(low=self.action_bound, high=self.action_bound)
         self.observation_space = spaces.Box(low=np.zeros(self.state_dim), high=np.ones(self.state_dim))
-        self.arm_info = np.zeros((6))
+        self.arm_info = np.zeros(8)
         self.point_info = np.array([250, 303])
         self.point_info_init = self.point_info.copy()
         self.center_coord = np.array(self.viewer_xy)/2
@@ -54,17 +54,18 @@ class ArmEnv(gym.Env):
         arm1rad = self.arm_info[0]
         arm2rad = self.arm_info[3]
 
-        arm1rad += action[0] * self.dt
-        arm2rad += action[1] * self.dt
+        arm1rad = (arm1rad + action[0] * self.dt) % (2 * np.pi)
+        arm2rad = (arm2rad + action[1] * self.dt) % (2 * np.pi)
 
         arm1dx_dy = np.array([self.arm1l * np.cos(arm1rad), self.arm1l * np.sin(arm1rad)])
-        arm2dx_dy = np.array([self.arm2l * np.cos(arm2rad), self.arm2l * np.sin(arm2rad)])
+        arm2dx_dy = np.array([self.arm2l * np.cos((arm1rad + arm2rad) % (2 * np.pi)), self.arm2l * np.sin((arm1rad + arm2rad) % (2 * np.pi))])
         arm1xy = self.center_coord + arm1dx_dy  # (x1, y1)
         arm2xy = arm1xy + arm2dx_dy  # (x2, y2)
 
-        if not self.is_collision(arm2xy, self.center_coord):
-            self.arm_info[:3] = np.hstack([arm1rad, arm1xy[0], arm1xy[1]])
-            self.arm_info[-3:] = np.hstack([arm2rad, arm2xy[0], arm2xy[1]])
+        #if not self.is_collision(arm2xy, self.center_coord):
+        self.arm_info[:3] = np.hstack([arm1rad, arm1xy[0], arm1xy[1]])
+        self.arm_info[3:6] = np.hstack([arm2rad, arm2xy[0], arm2xy[1]])
+        self.arm_info[6:8] = np.hstack([arm1rad, (arm1rad + arm2rad) % (2 * np.pi)])
 
         s, arm2_distance = self._get_state()
         r = self._r_func(arm2_distance)
@@ -81,6 +82,12 @@ class ArmEnv(gym.Env):
 
             return dist < dist_min
 
+        def _get_state(arm_info, point_info, center_coord):
+            # return the distance (dx, dy) between arm finger point with blue point
+            return torch.cat([arm_info[:, 0].view(-1, 1), arm_info[:, 3].view(-1, 1),
+                              (arm_info[:, 1:3] - point_info) / 200,
+                              (arm_info[:, 4:6] - point_info) / 200,
+                              (arm_info[:, 4:6] - center_coord) / 200], dim=-1)
 
         batch_size = u.shape[0]
         center_coord = torch.from_numpy(self.center_coord).unsqueeze(0).repeat(batch_size, 1)
@@ -92,8 +99,13 @@ class ArmEnv(gym.Env):
         arm1rad = x[:, 0]
         arm2rad = x[:, 3]
 
+        point_info = x[:, 4:6] + torch.cat([self.arm2l * torch.cos(arm2rad.view(-1, 1)), self.arm2l * torch.sin(arm2rad.view(-1, 1))], dim=-1)
+
         arm1rad = arm1rad + u[:, 0] * self.dt
         arm2rad = arm2rad + u[:, 1] * self.dt
+
+        arm1rad %= np.pi * 2
+        arm2rad %= np.pi * 2
 
         arm1rad = arm1rad.view(-1, 1)
         arm2rad = arm2rad.view(-1, 1)
@@ -105,9 +117,10 @@ class ArmEnv(gym.Env):
 
         in_col = is_collision(arm2xy, center_coord)
         new_arm = torch.cat([arm1rad, arm1xy[:, 0:2], arm2rad, arm2xy[:, 0:2]], dim=-1)
-        new_arm[in_col, :] = x[in_col, :]
+        x_new = _get_state(new_arm, point_info, center_coord)
+        x_new[in_col, :] = x[in_col, :]
 
-        return new_arm
+        return x_new
 
     def _reset_arm(self):
         arm1rad, arm2rad = np.random.rand(2) * np.pi * 2
@@ -149,11 +162,10 @@ class ArmEnv(gym.Env):
         # return the distance (dx, dy) between arm finger point with blue point
         arm_end = np.vstack([self.arm_info[1:3], self.arm_info[4:6]])
         t_arms = np.ravel(arm_end - self.point_info)
-        center_dis = (self.center_coord - self.point_info)/200
-        in_point = 1 if self.grab_counter > 0 else 0
-        return np.hstack([t_arms/200, center_dis,
-                          # arm1_distance_p, arm1_distance_b,
-                          ]), t_arms[-2:]
+        return np.hstack([self.arm_info[0], self.arm_info[3],
+                          (t_arms[0:2] - self.point_info) / 200,
+                          (t_arms[2:4] - self.point_info) / 200,
+                          (self.arm_info[4:6] - self.center_coord) / 200]), t_arms[-2:]
 
     def _r_func(self, distance):
         t = 50
@@ -197,8 +209,11 @@ class Viewer(pyglet.window.Window):
         self.arm1 = self.batch.add(4, pyglet.gl.GL_QUADS, None, ('v2f', arm1_box), ('c3B', c1))
         self.arm2 = self.batch.add(4, pyglet.gl.GL_QUADS, None, ('v2f', arm2_box), ('c3B', c1))
 
+        self.label = pyglet.text.Label("test", color=(0, 0, 0, 255), font_size=10, x=width//2, y=10,
+                                       anchor_x='center', anchor_y='center')
+
     def render(self):
-        pyglet.clock.tick()
+        self.label.text = f'{((self.arm_info[3] / np.pi) * 180):.2f}'
         self._update_arm()
         self.switch_to()
         self.dispatch_events()
@@ -208,6 +223,7 @@ class Viewer(pyglet.window.Window):
     def on_draw(self):
         self.clear()
         self.batch.draw()
+        self.label.draw()
         # self.fps_display.draw()
 
     def _update_arm(self):
@@ -221,24 +237,16 @@ class Viewer(pyglet.window.Window):
         arm1_coord = (*self.center_coord, *(self.arm_info[1:3]))  # (x0, y0, x1, y1)
         arm2_coord = (*(self.arm_info[1:3]), *(self.arm_info[4:6]))  # (x1, y1, x2, y2)
         arm1_thick_rad = np.pi / 2 - self.arm_info[0]
-        x01, y01 = arm1_coord[0] - np.cos(arm1_thick_rad) * self.bar_thc, arm1_coord[1] + np.sin(
-            arm1_thick_rad) * self.bar_thc
-        x02, y02 = arm1_coord[0] + np.cos(arm1_thick_rad) * self.bar_thc, arm1_coord[1] - np.sin(
-            arm1_thick_rad) * self.bar_thc
-        x11, y11 = arm1_coord[2] + np.cos(arm1_thick_rad) * self.bar_thc, arm1_coord[3] - np.sin(
-            arm1_thick_rad) * self.bar_thc
-        x12, y12 = arm1_coord[2] - np.cos(arm1_thick_rad) * self.bar_thc, arm1_coord[3] + np.sin(
-            arm1_thick_rad) * self.bar_thc
+        x01, y01 = arm1_coord[0:2] + np.array([-np.cos(arm1_thick_rad), np.sin(arm1_thick_rad)]) * self.bar_thc
+        x02, y02 = arm1_coord[0:2] + np.array([np.cos(arm1_thick_rad), -np.sin(arm1_thick_rad)]) * self.bar_thc
+        x11, y11 = arm1_coord[2:4] + np.array([np.cos(arm1_thick_rad), -np.sin(arm1_thick_rad)]) * self.bar_thc
+        x12, y12 = arm1_coord[2:4] + np.array([-np.cos(arm1_thick_rad), np.sin(arm1_thick_rad)]) * self.bar_thc
         arm1_box = (x01, y01, x02, y02, x11, y11, x12, y12)
-        arm2_thick_rad = np.pi / 2 - self.arm_info[3]
-        x11_, y11_ = arm2_coord[0] + np.cos(arm2_thick_rad) * self.bar_thc, arm2_coord[1] - np.sin(
-            arm2_thick_rad) * self.bar_thc
-        x12_, y12_ = arm2_coord[0] - np.cos(arm2_thick_rad) * self.bar_thc, arm2_coord[1] + np.sin(
-            arm2_thick_rad) * self.bar_thc
-        x21, y21 = arm2_coord[2] - np.cos(arm2_thick_rad) * self.bar_thc, arm2_coord[3] + np.sin(
-            arm2_thick_rad) * self.bar_thc
-        x22, y22 = arm2_coord[2] + np.cos(arm2_thick_rad) * self.bar_thc, arm2_coord[3] - np.sin(
-            arm2_thick_rad) * self.bar_thc
+        arm2_thick_rad = np.pi / 2 - self.arm_info[7]
+        x11_, y11_ = arm2_coord[0:2] + np.array([-np.cos(arm2_thick_rad), np.sin(arm2_thick_rad)]) * self.bar_thc
+        x12_, y12_ = arm2_coord[0:2] + np.array([np.cos(arm2_thick_rad), -np.sin(arm2_thick_rad)]) * self.bar_thc
+        x21, y21 = arm2_coord[2:4] + np.array([np.cos(arm2_thick_rad), -np.sin(arm2_thick_rad)]) * self.bar_thc
+        x22, y22 = arm2_coord[2:4] + np.array([-np.cos(arm2_thick_rad), np.sin(arm2_thick_rad)]) * self.bar_thc
         arm2_box = (x11_, y11_, x12_, y12_, x21, y21, x22, y22)
         self.arm1.vertices = arm1_box
         self.arm2.vertices = arm2_box
