@@ -16,6 +16,7 @@ class BallBoxEnv(gym.Env):
         self.viewer = None
         self.u_max = 1
         self.dt = .5
+        self.s_max = 1
         self.action_space = spaces.Box(
             low=-self.u_max,
             high=self.u_max, shape=(2,),
@@ -23,8 +24,8 @@ class BallBoxEnv(gym.Env):
         )
 
         self.observation_space = spaces.Box(
-            low=-1,
-            high=1, shape=(2,),
+            low=-self.s_max,
+            high=self.s_max, shape=(2,),
             dtype=np.float32
         )
 
@@ -36,11 +37,11 @@ class BallBoxEnv(gym.Env):
         x = self.state
 
         x += u * self.dt
-        self.state = np.clip(x, -1, 1.)
+        self.state = np.clip(x, -self.s_max, self.s_max)
         return self.state, None, False, {}
 
     def reset(self):
-        self.state = self.np_random.uniform(low=-1., high=1., size=(2, ))
+        self.state = self.np_random.uniform(low=-self.s_max, high=self.s_max, size=(2, ))
         self.last_u = None
         return self._get_obs()
 
@@ -57,7 +58,7 @@ class BallBoxEnv(gym.Env):
             from gym.envs.classic_control import rendering
             self.viewer = rendering.Viewer(500, 500)
             self.viewer.set_bounds(-1, 1, -1, 1)
-            ball = rendering.make_circle(.01)
+            ball = rendering.make_circle(.1)
             ball.set_color(0, 0, 0)
             self.ball_transform = rendering.Transform()
             ball.add_attr(self.ball_transform)
@@ -71,5 +72,16 @@ class BallBoxEnv(gym.Env):
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
     def step_batch(self, x, u):
-        u = torch.clamp(u, -1, 1)
-        return torch.clamp(x + u * self.dt, -1, 1)
+        u = torch.clamp(u, -self.u_max, self.u_max)
+        return torch.clamp(x + u * self.dt, -self.s_max, self.s_max)
+
+
+if __name__ == '__main__':
+    env = BallBoxEnv()
+    env.seed()
+    env.reset()
+    for _ in range(100):
+        env.render()
+        a = env.action_space.sample()
+        env.step(a)
+    env.close()
