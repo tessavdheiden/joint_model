@@ -21,6 +21,9 @@ class PendulumEnv(gym.Env):
         self.name = 'Pendulum'
         self.max_speed = 8
         self.u_max = MAX_TORQUE
+
+        self.u_low = np.array([-1])
+        self.u_high = np.array([1])
         self.dt = DELTA_T
         self.g = g
         self.m = MASS
@@ -29,8 +32,8 @@ class PendulumEnv(gym.Env):
 
         high = np.array([1., 1., self.max_speed], dtype=np.float32)
         self.action_space = spaces.Box(
-            low=-self.u_max,
-            high=self.u_max, shape=(1,),
+            low=self.u_low,
+            high=self.u_high, shape=(1,),
             dtype=np.float32
         )
         self.observation_space = spaces.Box(
@@ -51,7 +54,7 @@ class PendulumEnv(gym.Env):
         l = self.l
         dt = self.dt
 
-        u = np.clip(u, -self.u_max, self.u_max)[0]
+        u = np.clip(u, self.u_low, self.u_high)[0]
         self.last_u = u  # for rendering
         costs = angle_normalize(th) ** 2 + .1 * thdot ** 2 + .001 * (u ** 2)
 
@@ -107,13 +110,14 @@ class PendulumEnv(gym.Env):
         th, thdot = torch.atan2(x[:, 1], x[:, 0]).view(-1, 1), x[:, 2].view(-1, 1)  # th := theta
 
         max_speed = 8
-        u_max = MAX_TORQUE
         dt = DELTA_T
         g = 10.0
         m = MASS
         l = 1.
 
-        u = torch.clamp(u, -u_max, u_max)
+        up = torch.from_numpy(self.u_high).float()
+        lo = torch.from_numpy(self.u_low).float()
+        u = torch.max(torch.min(u, up), lo)
 
         newthdot = thdot + (-3 * g / (2 * l) * torch.sin(th + np.pi) + 3. / (m * l ** 2) * u) * dt
         newth = th + newthdot * dt
