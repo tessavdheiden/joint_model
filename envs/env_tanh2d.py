@@ -2,20 +2,9 @@ import gym
 from gym import spaces
 from gym.utils import seeding
 import numpy as np
-from os import path
+import torch
 
-
-def sigmoid(X):
-   return 1/(1+np.exp(-X))
-
-
-import gym
-from gym import spaces
-from gym.utils import seeding
-import numpy as np
-
-
-class Sigmoid2DEnv(gym.Env):
+class Tanh2DEnv(gym.Env):
     metadata = {
         'render.modes': ['human', 'rgb_array'],
         'video.frames_per_second': 30
@@ -25,15 +14,18 @@ class Sigmoid2DEnv(gym.Env):
         self.name = 'Sigmoid2D'
         self.viewer = None
         self.u_max = 1
+        self.dt = .1
+
         self.action_space = spaces.Box(
             low=-self.u_max,
             high=self.u_max, shape=(2,),
             dtype=np.float32
         )
-
+        self.s_max = 1
+        self.s_min = -1
         self.observation_space = spaces.Box(
-            low=0,
-            high=1, shape=(2,),
+            low=self.s_min,
+            high=self.s_max, shape=(2,),
             dtype=np.float32
         )
 
@@ -43,13 +35,13 @@ class Sigmoid2DEnv(gym.Env):
 
     def step(self, u):
         x = self.state
-
-        x += u
-        self.state = sigmoid(x)
+        u = np.clip(u, -self.u_max, self.u_max)
+        x += u * self.dt
+        self.state = np.tanh(x)
         return self.state, None, False, {}
 
     def reset(self):
-        self.state = self.np_random.uniform(low=0., high=1., size=(2, ))
+        self.state = self.np_random.uniform(low=self.s_min, high=self.s_max, size=(2, ))
         self.last_u = None
         return self._get_obs()
 
@@ -65,8 +57,9 @@ class Sigmoid2DEnv(gym.Env):
         if self.viewer is None:
             from gym.envs.classic_control import rendering
             self.viewer = rendering.Viewer(500, 500)
-            self.viewer.set_bounds(0, 1, 0, 1)
-            ball = rendering.make_circle(.01)
+
+            self.viewer.set_bounds(left=self.s_min, right=self.s_max, bottom=self.s_min, top=self.s_max)
+            ball = rendering.make_circle(.1)
             ball.set_color(0, 0, 0)
             self.ball_transform = rendering.Transform()
             ball.add_attr(self.ball_transform)
@@ -78,3 +71,20 @@ class Sigmoid2DEnv(gym.Env):
         self.ball_transform.set_translation(self.state[0], self.state[1])
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
+
+    def step_batch(self, x, u):
+        u = torch.clamp(u, -self.u_max, self.u_max)
+        return torch.tanh(x + u * self.dt)
+
+
+if __name__ == '__main__':
+    env = Tanh2DEnv()
+    env.seed()
+
+    for _ in range(100):
+        env.reset()
+        for _ in range(32):
+            env.render()
+            a = env.action_space.sample()
+            env.step(a)
+    env.close()
