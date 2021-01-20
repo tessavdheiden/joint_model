@@ -89,12 +89,12 @@ class PendulumEnv(gym.Env):
             axle = rendering.make_circle(.05)
             axle.set_color(0, 0, 0)
             self.viewer.add_geom(axle)
-            # fname = path.join(path.dirname(__file__), "assets/clockwise.png")
-            # self.img = rendering.Image(fname, 1., 1.)
+            fname = path.join(gym.__file__[:-12], "envs/classic_control/assets/clockwise.png")
+            self.img = rendering.Image(fname, 1., 1.)
             self.imgtrans = rendering.Transform()
-            # self.img.add_attr(self.imgtrans)
+            self.img.add_attr(self.imgtrans)
 
-        # self.viewer.add_onetime(self.img)
+        self.viewer.add_onetime(self.img)
         self.pole_transform.set_rotation(self.state[0] + np.pi / 2)
         if self.last_u:
             self.imgtrans.scale = (-self.last_u / 2, np.abs(self.last_u) / 2)
@@ -131,3 +131,12 @@ def angle_normalize(x):
     return (((x+np.pi) % (2*np.pi)) - np.pi)
 
 
+if __name__ == '__main__':
+    env = PendulumEnv()
+    env.seed()
+    env.reset()
+    for _ in range(1000):
+        env.render()
+        a = env.action_space.sample()
+        env.step(a)
+    env.close()
