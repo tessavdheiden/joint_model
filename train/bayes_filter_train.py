@@ -15,7 +15,7 @@ from envs.env_pendulum import PendulumEnv
 from envs.env_ball_box import BallBoxEnv
 from envs.env_sigmoid import SigmoidEnv
 from envs.env_tanh2d import Tanh2DEnv
-from envs.env_reacher import ReacherEnv
+# from envs.env_reacher import ReacherEnv
 from envs.env_arm import ArmEnv
 from filters.bayes_filter_viz import visualize_latent_space3D, visualize_latent_space2D, visualize_latent_space1D, \
                                 visualize_latent_spaceND, plot_trajectory
@@ -72,7 +72,6 @@ def train(replay_memory, bayes_filter):
     plt.savefig('img/loss.png')
 
 
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--val_frac', type=float, default=0.1,
                     help='fraction of data to be witheld in validation set')
@@ -84,11 +83,11 @@ parser.add_argument('--n_trials', type=int, default=2000,
 parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
 parser.add_argument('--n_subseq', type=int, default=4,
                     help='number of subsequences to divide each sequence into')
-parser.add_argument('--env', type=int, default=5,
-                    help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d, 4=reacher, 5=arm')
+parser.add_argument('--env', type=int, default=0,
+                    help='0=pendulum, 1=ball in box, 2=sigmoid, 3=tanh, 4=reacher, 5=arm')
 parser.add_argument('--filter_type', type=int, default=1,
-                    help='0=bayes filter, 1=bayes filter fully connected, 3=filter simple')
-parser.add_argument('--z_dim', type=int, default=11)
+                    help='0=bayes filter, 1=bayes filter fully connected')
+parser.add_argument('--z_dim', type=int, default=2)
 args = parser.parse_args()
 
 
@@ -120,9 +119,7 @@ if __name__ == '__main__':
     if args.filter_type == 0:
         bayes_filter = BayesFilter.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=args.z_dim)
     elif args.filter_type == 1:
-        bayes_filter = BayesFilterFullyConnected.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=args.z_dim)
-    elif args.filter_type == 2:
-        bayes_filter = SimpleFilter.init_from_replay_memory(replay_memory, u_max=env.u_max, z_dim=args.z_dim)
+        bayes_filter = BayesFilterFullyConnected.init_from_replay_memory(replay_memory, u_low=env.u_low, u_high=env.u_high, z_dim=args.z_dim)
 
     assert bayes_filter.z_dim <= replay_memory.state_dim
 

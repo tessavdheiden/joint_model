@@ -110,18 +110,23 @@ def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_
     if args.env == 0:
         x1 = np.arctan2(x[:, 1], x[:, 0])
         x2 = x[:, 2]
+    elif args.env == 5:
+        x1 = x[:, -2]
+        x2 = x[:, -1]
     else:
         x1 = x[:, 0]
         x2 = x[:, 1]
+
     fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 3))
     c = ax.hexbin(x1, x2, gridsize=20, C=e[:], mincnt=1, vmin=e.mean() - .1)
+    if args.env == 1 or args.env == 3: # tanh or ball in box
+        ax.axis('square')
     fig.colorbar(c, ax=ax)
     ax.set_title(f'Empowerment Landscape, ep = {ep}')
     ax.set_xlabel('x at dim=0')
     ax.set_ylabel('x at dim=1')
     plt.savefig(f'img/empowerment_landscape.png')
     plt.close()
-
 
 
 def visualize_distributions_2D(empowerment, bayes_filter, replay_memory):

@@ -19,7 +19,6 @@ from filters.bayes_filter_fully_connected import BayesFilterFullyConnected
 from filters.simple_filter import SimpleFilter
 from memory.replay_memory import ReplayMemory
 from empowerment.empowerment_viz import visualize_empowerment_landschape_1D, visualize_empowerment_landschape_2D
-from filters.bayes_filter_viz import visualize_latent_space1D
 
 Record = namedtuple('Transition', ['ep', 'E'])
 
@@ -47,8 +46,7 @@ def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
                 empowerment.prepare_eval()
                 if replay_memory.state_dim == 1:
                     visualize_empowerment_landschape_1D(empowerment, bayes_filter, replay_memory, ep=i)
-                    visualize_latent_space1D(bayes_filter, replay_memory)
-                elif replay_memory.state_dim > 1:
+                else:
                     visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_memory, ep=i)
                 empowerment.prepare_update()
 
@@ -78,7 +76,7 @@ def main():
     parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
                         help='number of subsequences to divide each sequence into')
-    parser.add_argument('--env', type=int, default=3,
+    parser.add_argument('--env', type=int, default=0,
                         help='0=pendulum, 1=ball in box, 2=sigmoid, 3=tanh2d')
     parser.add_argument('--filter_type', type=int, default=1,
                         help='0=bayes filter, 1=bayes filter fully connected')
