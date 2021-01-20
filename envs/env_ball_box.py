@@ -14,12 +14,13 @@ class BallBoxEnv(gym.Env):
     def __init__(self):
         self.name = 'BallInBox'
         self.viewer = None
-        self.u_max = 1
+        self.u_low = np.array([-1., -1.])
+        self.u_high = np.array([1., 1.])
         self.dt = .5
         self.s_max = 1
         self.action_space = spaces.Box(
-            low=-self.u_max,
-            high=self.u_max, shape=(2,),
+            low=self.u_low,
+            high=self.u_high, shape=(2,),
             dtype=np.float32
         )
 
@@ -35,7 +36,7 @@ class BallBoxEnv(gym.Env):
 
     def step(self, u):
         x = self.state
-
+        u = np.clip(u, self.u_low, self.u_high)
         x += u * self.dt
         self.state = np.clip(x, -self.s_max, self.s_max)
         return self.state, None, False, {}
@@ -72,7 +73,9 @@ class BallBoxEnv(gym.Env):
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
     def step_batch(self, x, u):
-        u = torch.clamp(u, -self.u_max, self.u_max)
+        up = torch.from_numpy(self.u_high).float()
+        lo = torch.from_numpy(self.u_low).float()
+        u = torch.max(torch.min(u, up), lo)
         return torch.clamp(x + u * self.dt, -self.s_max, self.s_max)
 
 

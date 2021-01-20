@@ -15,7 +15,7 @@ from controller import Controller
 from envs.env_pendulum import PendulumEnv
 from envs.env_ball_box import BallBoxEnv
 from envs.env_sigmoid import SigmoidEnv
-from envs.env_sigmoid2d import Sigmoid2DEnv
+from envs.env_tanh2d import Tanh2DEnv
 
 Record = namedtuple('Record', ['ep', 'l'])
 
@@ -235,40 +235,33 @@ def plot_trajectory(bayes_filter, replay_memory, ep=-1):
     axc = plt.gca()
     replay_memory.reset_batchptr_train()
 
-    for b in range(replay_memory.n_batches_train):
-        batch_dict = replay_memory.next_batch_train()
-        x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
-        _, _, z, _ = bayes_filter.propagate_solution(x=x, u=u)
+    batch_dict = replay_memory.next_batch_train()
+    x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
+    _, _, z, _ = bayes_filter.propagate_solution(x=x, u=u)
 
-        z = z[:, 0]
-        x_dvbf, _ = bayes_filter.decode(z)
-        x_hat = []
-        x_hat.append(x_dvbf.unsqueeze(1))
-        for t in range(1, bayes_filter.T):
-            z_, _ = bayes_filter(u=u[:, t - 1], z=z)
-            x_dvbf, _ = bayes_filter.decode(z_)
-            z = z_
-            x_hat.append(x_dvbf.unsqueeze(1))
-        x_pred, _, _, _ = bayes_filter.propagate_solution(x, u)
-        x_hat = torch.cat(x_hat, dim=1)
+    # batch_size, seq_len, x_dim = x.shape
+    z_ = z[:, 0]
+    x_dvbf, _ = bayes_filter.decode(z_)
+    x_hat = torch.zeros_like(x)
+    x_hat[:, 0] = x_dvbf
 
-        t = np.arange(replay_memory.seq_length)
-        x_hat = x_hat.detach().numpy()
-        x_pred = x_pred.detach().numpy()
-        x = x.detach().numpy()
+    for t in range(1, bayes_filter.T):
+        z_, _ = bayes_filter(u=u[:, t - 1], z=z_)
+        x_dvbf, _ = bayes_filter.decode(z_)
+        x_hat[:, t] = x_dvbf
 
+    t = np.arange(replay_memory.seq_length)
+    x_hat = x_hat.detach().numpy()
+    x = x.detach().numpy()
 
-        for i in range(replay_memory.batch_size):
-            c = next(axc._get_lines.prop_cycler)['color']
-
-            for dim in range(x_hat.shape[2]):
-                ax[dim].plot(t, x_hat[i, :, dim], linestyle='--', color=c, label='dvbf trans')
-                ax[dim].plot(t, x[i, :, dim], color=c, label='true')
-                ax[dim].set_xlabel('time')
-                ax[dim].set_ylabel(f'x at dim={dim}')
-                ax[dim].legend()
-            if i > 0: break
-        break
+    for i in range(1):
+        c = next(axc._get_lines.prop_cycler)['color']
+        for dim in range(x_hat.shape[2]):
+            ax[dim].plot(t, x_hat[i, :, dim], linestyle='--', color=c, label='DVBF')
+            ax[dim].plot(t, x[i, :, dim], color=c, label='true')
+            ax[dim].set_xlabel('time')
+            ax[dim].set_ylabel(f'x at dim={dim}')
+            ax[dim].legend()
 
     fig.tight_layout(rect=[0, 0.03, 1, 0.95])
     fig.suptitle(f'{type(bayes_filter).__name__} Prediction, ep = {ep}')
@@ -277,7 +270,7 @@ def plot_trajectory(bayes_filter, replay_memory, ep=-1):
 
 
 def main():
-    from bayes_filter_train import args
+    from train.bayes_filter_train import args
     if not os.path.exists('../param'):
         print('bayes filter not trained')
 
@@ -290,7 +283,7 @@ def main():
     elif args.env == 2:
         env = SigmoidEnv()
     elif args.env == 3:
-        env = Sigmoid2DEnv()
+        env = Tanh2DEnv()
     env.seed(0)
 
     controller = Controller(env)

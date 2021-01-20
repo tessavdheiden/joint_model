@@ -14,7 +14,7 @@ from controller import Controller
 from envs.env_pendulum import PendulumEnv
 from envs.env_ball_box import BallBoxEnv
 from envs.env_sigmoid import SigmoidEnv
-from envs.env_sigmoid2d import Sigmoid2DEnv
+from envs.env_tanh2d import Tanh2DEnv
 from envs.env_reacher import ReacherEnv
 from envs.env_arm import ArmEnv
 from filters.bayes_filter_viz import visualize_latent_space3D, visualize_latent_space2D, visualize_latent_space1D, \
@@ -94,10 +94,10 @@ args = parser.parse_args()
 
 if __name__ == '__main__':
 
-    if not os.path.exists('img'):
-        os.makedirs('img')
-    if not os.path.exists('param'):
-        os.makedirs('param')
+    if not os.path.exists('../img'):
+        os.makedirs('../img')
+    if not os.path.exists('../param'):
+        os.makedirs('../param')
 
     torch.manual_seed(0)
     np.random.seed(0)
@@ -108,7 +108,7 @@ if __name__ == '__main__':
     elif args.env == 2:
         env = SigmoidEnv()
     elif args.env == 3:
-        env = Sigmoid2DEnv()
+        env = Tanh2DEnv()
     elif args.env == 4:
         env = ReacherEnv()
     elif args.env == 5:

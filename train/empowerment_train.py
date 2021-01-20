@@ -9,8 +9,9 @@ import matplotlib.pyplot as plt
 from envs.env_pendulum import PendulumEnv
 from envs.env_ball_box import BallBoxEnv
 from envs.env_sigmoid import SigmoidEnv
-from envs.env_sigmoid2d import Sigmoid2DEnv
-from envs.env_reacher import ReacherEnv
+from envs.env_tanh2d import Tanh2DEnv
+#from envs.env_reacher import ReacherEnv
+from envs.env_arm import ArmEnv
 from empowerment.empowerment import Empowerment
 from controller import Controller
 from filters.bayes_filter import BayesFilter
@@ -77,15 +78,15 @@ def main():
     parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
                         help='number of subsequences to divide each sequence into')
-    parser.add_argument('--env', type=int, default=4,
-                        help='0=pendulum, 1=ball in box, 2=sigmoid, 3=sigmoid2d')
+    parser.add_argument('--env', type=int, default=3,
+                        help='0=pendulum, 1=ball in box, 2=sigmoid, 3=tanh2d')
     parser.add_argument('--filter_type', type=int, default=1,
                         help='0=bayes filter, 1=bayes filter fully connected')
     parser.add_argument('--use_filter', type=int, default=0,
                         help='0=env, 1=filter')
     args = parser.parse_args()
 
-    if not os.path.exists('param'):
+    if not os.path.exists('../param'):
         print('bayes filter not trained')
 
     torch.manual_seed(0)
@@ -97,9 +98,11 @@ def main():
     elif args.env == 2:
         env = SigmoidEnv()
     elif args.env == 3:
-        env = Sigmoid2DEnv()
+        env = Tanh2DEnv()
     elif args.env == 4:
         env = ReacherEnv()
+    elif args.env == 5:
+        env = ArmEnv()
     env.seed(0)
 
     controller = Controller(env)
