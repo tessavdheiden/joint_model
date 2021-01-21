@@ -23,7 +23,7 @@ from envs.env_arm import ArmEnv
 np.random.seed(1)
 tf.random.set_seed(1)
 
-MAX_EPISODES = 600
+MAX_EPISODES = 100
 MAX_EP_STEPS = 200
 LR_A = 1e-4  # learning rate for actor
 LR_C = 1e-4  # learning rate for critic
@@ -38,10 +38,10 @@ LOAD = False
 MODE = ['easy', 'hard']
 n_model = 1
 
-env = ArmEnv(mode=MODE[n_model])
-STATE_DIM = env.state_dim
+env = ArmEnv()
+STATE_DIM = env.observation_space.shape[0]
 ACTION_DIM = env.action_dim
-ACTION_BOUND = env.action_bound
+ACTION_BOUND = env.u_high
 tf.compat.v1.disable_eager_execution()
 # all placeholder for tf
 with tf.name_scope('S'):
@@ -254,9 +254,9 @@ def train():
                 break
         rewards.append(ep_reward)
     if os.path.isdir(path): shutil.rmtree(path)
-    os.mkdir(path)
-    ckpt_path = os.path.join('./' + MODE[n_model], 'DDPG.ckpt')
-    save_path = saver.save(sess, ckpt_path, write_meta_graph=False)
+    #os.mkdir(path)
+    #ckpt_path = os.path.join('./' + MODE[n_model], 'DDPG.ckpt')
+    #save_path = saver.save(sess, ckpt_path, write_meta_graph=False)
     print("\nSave Model %s\n" % save_path)
     plt.scatter(np.arange(len(rewards)), rewards)
     plt.savefig('img/reward_policy.png')

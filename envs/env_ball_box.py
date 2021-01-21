@@ -3,36 +3,34 @@ from gym import spaces
 from gym.utils import seeding
 import numpy as np
 import torch
+from envs.env_abs import AbsEnv
 
 
-class BallBoxEnv(gym.Env):
+class BallBoxEnv(AbsEnv):
     metadata = {
         'render.modes': ['human', 'rgb_array'],
         'video.frames_per_second': 30
     }
 
+    dt = .5
+    u_low = np.array([-1., -1.])
+    u_high = np.array([1., 1.])
+
+    action_space = spaces.Box(
+        low=u_low,
+        high=u_high, shape=(2,),
+        dtype=np.float32
+    )
+    s_max = 1
+    observation_space = spaces.Box(
+        low=-s_max,
+        high=s_max, shape=(2,),
+        dtype=np.float32
+    )
+
     def __init__(self):
         self.name = 'BallInBox'
         self.viewer = None
-        self.u_low = np.array([-1., -1.])
-        self.u_high = np.array([1., 1.])
-        self.dt = .5
-        self.s_max = 1
-        self.action_space = spaces.Box(
-            low=self.u_low,
-            high=self.u_high, shape=(2,),
-            dtype=np.float32
-        )
-
-        self.observation_space = spaces.Box(
-            low=-self.s_max,
-            high=self.s_max, shape=(2,),
-            dtype=np.float32
-        )
-
-    def seed(self, seed=None):
-        self.np_random, seed = seeding.np_random(seed)
-        return [seed]
 
     def step(self, u):
         x = self.state

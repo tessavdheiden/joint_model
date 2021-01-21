@@ -1,176 +1,102 @@
-"""
-Environment for Robot Arm.
-You can customize this script in a way you want.
-View more on [莫烦Python] : https://morvanzhou.github.io/tutorials/
-Requirement:
-pyglet >= 1.2.4
-numpy >= 1.12.1
-"""
 import numpy as np
-import pyglet
-import gym
 from gym import spaces
-import torch
+from numpy import sin, cos, pi
+from envs.env_abs import AbsEnv
 
-#pyglet.clock.set_fps_limit(10000)
 
+class ArmEnv(AbsEnv):
+    '''
+    [cos(theta1) sin(theta1) cos(theta2) sin(theta2) thetaDot1 thetaDot2]
+    '''
+    metadata = {
+        'render.modes': ['human', 'rgb_array'],
+        'video.frames_per_second': 30
+    }
 
-class ArmEnv(gym.Env):
-    action_bound = np.array([1, 1])
+    dt = .1
+    u_low = np.array([-1., -1.])
+    u_high = np.array([1., 1.])
+    action_space = spaces.Box(
+        low=u_low,
+        high=u_high, shape=(2,),
+        dtype=np.float32
+    )
+    s_min = -1
+    s_max = 1
+
+    observation_space = spaces.Box(
+        low=-s_max,
+        high=s_max, shape=(6,),
+        dtype=np.float32
+    )
     action_dim = 2
-    state_dim = 8
-    dt = .1  # refresh rate
-    arm1l = 100
-    arm2l = 100
-    viewer = None
-    viewer_xy = (400, 400)
-    get_point = False
-    mouse_in = np.array([False])
-    point_l = 15
-    grab_counter = 0
-    bar_thc = 5
 
-    def __init__(self, mode='easy'):
+    LINK_LENGTH_1 = 1
+    LINK_LENGTH_2 = 1
+
+    point_l = .5
+    grab_counter = 0
+
+    def __init__(self):
         # node1 (d_rad, x, y),
         # node2 (d_rad, x, y)
-        self.mode = mode
-        self.action_space = spaces.Box(low=self.action_bound, high=self.action_bound)
-        self.observation_space = spaces.Box(low=np.zeros(self.state_dim), high=np.ones(self.state_dim))
-        self.arm_info = np.zeros(8)
-        self.point_info = np.array([250, 303])
+
+        self.state = np.zeros(8)
+        self.point_info = np.array([1, 1])
         self.point_info_init = self.point_info.copy()
-        self.center_coord = np.array(self.viewer_xy)/2
+        self.center_coord = np.array([0, 0])
 
-    def is_collision(self, p1, p2):
-        delta_pos = p1 - p2
-        dist = np.sqrt(np.sum(np.square(delta_pos)))
-        dist_min = self.bar_thc * 3
-        return True if dist < dist_min else False
+        self.last_u = np.array([None, None])
+        self.viewer = None
 
-    def step(self, action):
+    def step(self, u):
         # action = (node1 angular v, node2 angular v)
-        action = np.clip(action, -self.action_bound, self.action_bound)
+        u = np.clip(u, self.u_low, self.u_high)
 
-        arm1rad = self.arm_info[0]
-        arm2rad = self.arm_info[3]
+        arm1rad = self.state[0]
+        arm2rad = self.state[1]
 
-        arm1rad = (arm1rad + action[0] * self.dt) % (2 * np.pi)
-        arm2rad = (arm2rad + action[1] * self.dt) % (2 * np.pi)
+        self.state[0] = angle_normalize(arm1rad + u[0] * self.dt)
+        self.state[1] = angle_normalize(arm2rad + u[1] * self.dt)
 
-        arm1dx_dy = np.array([self.arm1l * np.cos(arm1rad), self.arm1l * np.sin(arm1rad)])
-        arm2dx_dy = np.array([self.arm2l * np.cos((arm1rad + arm2rad) % (2 * np.pi)), self.arm2l * np.sin((arm1rad + arm2rad) % (2 * np.pi))])
-        arm1xy = self.center_coord + arm1dx_dy  # (x1, y1)
-        arm2xy = arm1xy + arm2dx_dy  # (x2, y2)
-
-        #if not self.is_collision(arm2xy, self.center_coord):
-        self.arm_info[:3] = np.hstack([arm1rad, arm1xy[0], arm1xy[1]])
-        self.arm_info[3:6] = np.hstack([arm2rad, arm2xy[0], arm2xy[1]])
-        self.arm_info[6:8] = np.hstack([arm1rad, (arm1rad + arm2rad) % (2 * np.pi)])
-
-        s, arm2_distance = self._get_state()
+        s, arm2_distance = self._get_obs()
         r = self._r_func(arm2_distance)
 
         return s, r, self.get_point
 
-    def step_batch(self, x, u):
-        def is_collision(p1, p2):
-            batch_size = p1.shape[0]
-            dist_min = torch.ones(batch_size) * self.bar_thc * 3
-
-            delta_pos = p1 - p2
-            dist = torch.sqrt(torch.sum((delta_pos ** 2), dim=-1))
-
-            return dist < dist_min
-
-        def _get_state(arm_info, point_info, center_coord):
-            # return the distance (dx, dy) between arm finger point with blue point
-            return torch.cat([arm_info[:, 0].view(-1, 1), arm_info[:, 3].view(-1, 1),
-                              (arm_info[:, 1:3] - point_info) / 200,
-                              (arm_info[:, 4:6] - point_info) / 200,
-                              (arm_info[:, 4:6] - center_coord) / 200], dim=-1)
-
-        batch_size = u.shape[0]
-        center_coord = torch.from_numpy(self.center_coord).unsqueeze(0).repeat(batch_size, 1)
-        center_coord = center_coord.type(x.type())
-
-        # action = (node1 angular v, node2 angular v)
-        u = torch.clamp(u, -self.action_bound[0], self.action_bound[1])
-
-        arm1rad = x[:, 0]
-        arm2rad = x[:, 3]
-
-        point_info = x[:, 4:6] + torch.cat([self.arm2l * torch.cos(arm2rad.view(-1, 1)), self.arm2l * torch.sin(arm2rad.view(-1, 1))], dim=-1)
-
-        arm1rad = arm1rad + u[:, 0] * self.dt
-        arm2rad = arm2rad + u[:, 1] * self.dt
-
-        arm1rad %= np.pi * 2
-        arm2rad %= np.pi * 2
-
-        arm1rad = arm1rad.view(-1, 1)
-        arm2rad = arm2rad.view(-1, 1)
-
-        arm1dx_dy = torch.cat([self.arm1l * torch.cos(arm1rad), self.arm1l * torch.sin(arm1rad)], dim=-1)
-        arm2dx_dy = torch.cat([self.arm2l * torch.cos(arm2rad), self.arm2l * torch.sin(arm2rad)], dim=-1)
-        arm1xy = center_coord + arm1dx_dy  # (x1, y1)
-        arm2xy = arm1xy + arm2dx_dy  # (x2, y2)
-
-        in_col = is_collision(arm2xy, center_coord)
-        new_arm = torch.cat([arm1rad, arm1xy[:, 0:2], arm2rad, arm2xy[:, 0:2]], dim=-1)
-        x_new = _get_state(new_arm, point_info, center_coord)
-        x_new[in_col, :] = x[in_col, :]
-
-        return x_new
-
     def _reset_arm(self):
-        arm1rad, arm2rad = np.random.rand(2) * np.pi * 2
-        self.arm_info[0] = arm1rad
-        self.arm_info[3] = arm2rad
-        arm1dx_dy = np.array([self.arm1l * np.cos(arm1rad), self.arm1l * np.sin(arm1rad)])
-        arm2dx_dy = np.array([self.arm2l * np.cos(arm2rad), self.arm2l * np.sin(arm2rad)])
-        self.arm_info[1:3] = self.center_coord + arm1dx_dy  # (x1, y1)
-        self.arm_info[4:6] = self.arm_info[1:3] + arm2dx_dy  # (x2, y2)
+        arm1rad, arm2rad = np.random.rand(2) * 2 * np.pi - np.pi
+        self.state[0] = arm1rad
+        self.state[1] = arm2rad
 
     def reset(self):
         self.get_point = False
         self.grab_counter = 0
 
-        if self.mode == 'hard':
-            pxy = np.clip(np.random.rand(2) * self.viewer_xy[0], 100, 300)
-            self.point_info[:] = pxy
-        else:
-            self.point_info[:] = self.point_info_init
-
+        angle = np.random.rand(1)[0] * pi * 2
+        radius = np.random.rand(1)[0] * (self.LINK_LENGTH_1 + self.LINK_LENGTH_2)
+        self.point_info = radius * np.array([cos(angle), sin(angle)])
         self._reset_arm()
-        while self.is_collision(self.arm_info[-2:], self.center_coord):
-            self._reset_arm()
+        return self._get_obs()[0]
 
-        return self._get_state()[0]
+    def _get_obs(self):
+        arm1rad, arm2rad = self.state[0], self.state[1]
+        arm1dx_dy = np.array([self.LINK_LENGTH_1 * cos(arm1rad), self.LINK_LENGTH_1 * sin(arm1rad)])
+        arm2dx_dy = np.array([self.LINK_LENGTH_2 * cos(arm2rad), self.LINK_LENGTH_2 * sin(arm2rad)])
+        xy1 = self.center_coord + arm1dx_dy  # (x1, y1)
+        xy2 = xy1 + arm2dx_dy  # (x2, y2)
 
-    def render(self):
-        if self.viewer is None:
-            self.viewer = Viewer(*self.viewer_xy, self.arm_info, self.point_info, self.point_l, self.mouse_in, self.bar_thc)
-        self.viewer.render()
-
-    def sample_action(self):
-        return np.random.uniform(*self.action_bound, size=self.action_dim)
-
-    def set_fps(self, fps=30):
-        pyglet.clock.set_fps_limit(fps)
-
-    def _get_state(self):
         # return the distance (dx, dy) between arm finger point with blue point
-        arm_end = np.vstack([self.arm_info[1:3], self.arm_info[4:6]])
-        t_arms = np.ravel(arm_end - self.point_info)
-        return np.hstack([self.arm_info[0], self.arm_info[3],
-                          (t_arms[0:2] - self.point_info) / 200,
-                          (t_arms[2:4] - self.point_info) / 200,
-                          (self.arm_info[4:6] - self.center_coord) / 200]), t_arms[-2:]
+        delta1 = np.ravel(xy1 - self.point_info)
+        delta2 = np.ravel(xy2 - self.point_info)
+
+        in_point = 1 if self.grab_counter > 0 else 0
+        return np.hstack([delta1, delta2, self.point_info]), delta2
 
     def _r_func(self, distance):
         t = 50
         abs_distance = np.sqrt(np.sum(np.square(distance)))
-        r = -abs_distance/200
+        r = -abs_distance
         if abs_distance < self.point_l and (not self.get_point):
             r += 1.
             self.grab_counter += 1
@@ -182,98 +108,55 @@ class ArmEnv(gym.Env):
             self.get_point = False
         return r
 
+    def render(self, mode='human'):
+        from gym.envs.classic_control import rendering
 
-class Viewer(pyglet.window.Window):
-    color = {
-        'background': [1]*3 + [1]
-    }
-#    fps_display = pyglet.clock.ClockDisplay()
+        s = self.state
 
-    def __init__(self, width, height, arm_info, point_info, point_l, mouse_in, bar_thc):
-        super(Viewer, self).__init__(width, height, resizable=False, caption='Arm', vsync=False)  # vsync=False to not use the monitor FPS
-        self.set_location(x=80, y=10)
-        pyglet.gl.glClearColor(*self.color['background'])
+        if self.viewer is None:
+            self.viewer = rendering.Viewer(500, 500)
+            bound = self.LINK_LENGTH_1 + self.LINK_LENGTH_2 + 0.2  # 2.2 for default
+            self.viewer.set_bounds(-bound, bound, -bound, bound)
 
-        self.arm_info = arm_info
-        self.point_info = point_info
-        self.mouse_in = mouse_in
-        self.point_l = point_l
-        self.bar_thc = bar_thc
+        if s is None: return None
 
-        self.center_coord = np.array((min(width, height)/2, ) * 2)
-        self.batch = pyglet.graphics.Batch()
+        p1 = [self.LINK_LENGTH_1 * cos(s[0]), self.LINK_LENGTH_1 * sin(s[0])]
 
-        arm1_box, arm2_box, point_box = [0]*8, [0]*8, [0]*8
-        c1, c2, c3 = (249, 86, 86)*4, (86, 109, 249)*4, (249, 39, 65)*4
-        self.point = self.batch.add(4, pyglet.gl.GL_QUADS, None, ('v2f', point_box), ('c3B', c2))
-        self.arm1 = self.batch.add(4, pyglet.gl.GL_QUADS, None, ('v2f', arm1_box), ('c3B', c1))
-        self.arm2 = self.batch.add(4, pyglet.gl.GL_QUADS, None, ('v2f', arm2_box), ('c3B', c1))
+        p2 = [p1[0] + self.LINK_LENGTH_2 * cos(s[1]),
+              p1[1] + self.LINK_LENGTH_2 * sin(s[1])]
 
-        self.label = pyglet.text.Label("test", color=(0, 0, 0, 255), font_size=10, x=width//2, y=10,
-                                       anchor_x='center', anchor_y='center')
+        xys = np.array([[0, 0], p1, p2])#[:, ::-1]
+        thetas = [s[0], s[1]]
+        link_lengths = [self.LINK_LENGTH_1, self.LINK_LENGTH_2]
 
-    def render(self):
-        self.label.text = f'{((self.arm_info[3] / np.pi) * 180):.2f}'
-        self._update_arm()
-        self.switch_to()
-        self.dispatch_events()
-        self.dispatch_event('on_draw')
-        self.flip()
+        target = self.viewer.draw_circle(.1)
+        target.set_color(8, 0, 0)
+        ttransform = rendering.Transform(translation=(self.point_info[0], self.point_info[1]))
+        target.add_attr(ttransform)
 
-    def on_draw(self):
-        self.clear()
-        self.batch.draw()
-        self.label.draw()
-        # self.fps_display.draw()
+        for ((x, y), th, llen) in zip(xys, thetas, link_lengths):
+            l, r, t, b = 0, llen, .1, -.1
+            jtransform = rendering.Transform(rotation=th, translation=(x, y))
+            link = self.viewer.draw_polygon([(l, b), (l, t), (r, t), (r, b)])
+            link.add_attr(jtransform)
+            link.set_color(0, .8, .8)
+            circ = self.viewer.draw_circle(.1)
+            circ.set_color(.8, .8, 0)
+            circ.add_attr(jtransform)
 
-    def _update_arm(self):
-        point_l = self.point_l
-        point_box = (self.point_info[0] - point_l, self.point_info[1] - point_l,
-                     self.point_info[0] + point_l, self.point_info[1] - point_l,
-                     self.point_info[0] + point_l, self.point_info[1] + point_l,
-                     self.point_info[0] - point_l, self.point_info[1] + point_l)
-        self.point.vertices = point_box
+        return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
-        arm1_coord = (*self.center_coord, *(self.arm_info[1:3]))  # (x0, y0, x1, y1)
-        arm2_coord = (*(self.arm_info[1:3]), *(self.arm_info[4:6]))  # (x1, y1, x2, y2)
-        arm1_thick_rad = np.pi / 2 - self.arm_info[0]
-        x01, y01 = arm1_coord[0:2] + np.array([-np.cos(arm1_thick_rad), np.sin(arm1_thick_rad)]) * self.bar_thc
-        x02, y02 = arm1_coord[0:2] + np.array([np.cos(arm1_thick_rad), -np.sin(arm1_thick_rad)]) * self.bar_thc
-        x11, y11 = arm1_coord[2:4] + np.array([np.cos(arm1_thick_rad), -np.sin(arm1_thick_rad)]) * self.bar_thc
-        x12, y12 = arm1_coord[2:4] + np.array([-np.cos(arm1_thick_rad), np.sin(arm1_thick_rad)]) * self.bar_thc
-        arm1_box = (x01, y01, x02, y02, x11, y11, x12, y12)
-        arm2_thick_rad = np.pi / 2 - self.arm_info[7]
-        x11_, y11_ = arm2_coord[0:2] + np.array([-np.cos(arm2_thick_rad), np.sin(arm2_thick_rad)]) * self.bar_thc
-        x12_, y12_ = arm2_coord[0:2] + np.array([np.cos(arm2_thick_rad), -np.sin(arm2_thick_rad)]) * self.bar_thc
-        x21, y21 = arm2_coord[2:4] + np.array([np.cos(arm2_thick_rad), -np.sin(arm2_thick_rad)]) * self.bar_thc
-        x22, y22 = arm2_coord[2:4] + np.array([-np.cos(arm2_thick_rad), np.sin(arm2_thick_rad)]) * self.bar_thc
-        arm2_box = (x11_, y11_, x12_, y12_, x21, y21, x22, y22)
-        self.arm1.vertices = arm1_box
-        self.arm2.vertices = arm2_box
+def angle_normalize(x):
+    return (((x+pi) % (2*pi)) - pi)
 
-    def on_key_press(self, symbol, modifiers):
-        if symbol == pyglet.window.key.UP:
-            self.arm_info[0] += .1
-            print(self.arm_info[:, 1:3] - self.point_info)
-        elif symbol == pyglet.window.key.DOWN:
-            self.arm_info[0] -= .1
-            print(self.arm_info[:, 1:3] - self.point_info)
-        elif symbol == pyglet.window.key.LEFT:
-            self.arm_info[3] += .1
-            print(self.arm_info[:, 1:3] - self.point_info)
-        elif symbol == pyglet.window.key.RIGHT:
-            self.arm_info[3] -= .1
-            print(self.arm_info[:, 1:3] - self.point_info)
-        elif symbol == pyglet.window.key.Q:
-            pyglet.clock.set_fps_limit(1000)
-        elif symbol == pyglet.window.key.A:
-            pyglet.clock.set_fps_limit(30)
+if __name__ == '__main__':
+    env = ArmEnv()
+    env.seed()
 
-    def on_mouse_motion(self, x, y, dx, dy):
-        self.point_info[:] = [x, y]
-
-    def on_mouse_enter(self, x, y):
-        self.mouse_in[0] = True
-
-    def on_mouse_leave(self, x, y):
-        self.mouse_in[0] = False
+    for _ in range(32):
+        env.reset()
+        for _ in range(100):
+            env.render()
+            a = env.action_space.sample()
+            env.step(a)
+    env.close()
