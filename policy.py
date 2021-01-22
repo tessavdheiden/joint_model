@@ -34,7 +34,7 @@ MEMORY_CAPACITY = 5000
 BATCH_SIZE = 16
 VAR_MIN = 0.1
 RENDER = True
-LOAD = False
+LOAD = True
 MODE = ['easy', 'hard']
 n_model = 1
 
@@ -203,7 +203,7 @@ actor.add_grad_to_graph(critic.a_grads)
 M = Memory(MEMORY_CAPACITY, dims=2 * STATE_DIM + ACTION_DIM + 1)
 
 saver = tf.compat.v1.train.Saver()
-path = './' + MODE[n_model]
+path = './' + 'param'
 
 if LOAD:
     saver.restore(sess, tf.train.latest_checkpoint(path))
@@ -254,23 +254,41 @@ def train():
                 break
         rewards.append(ep_reward)
     if os.path.isdir(path): shutil.rmtree(path)
-    #os.mkdir(path)
-    #ckpt_path = os.path.join('./' + MODE[n_model], 'DDPG.ckpt')
-    #save_path = saver.save(sess, ckpt_path, write_meta_graph=False)
+    os.mkdir(path)
+    ckpt_path = os.path.join('./' + 'param', 'DDPG.ckpt')
+    save_path = saver.save(sess, ckpt_path, write_meta_graph=False)
     print("\nSave Model %s\n" % save_path)
     plt.scatter(np.arange(len(rewards)), rewards)
     plt.savefig('img/reward_policy.png')
 
 
 def eval():
-    env.set_fps(30)
+    import imageio
     s = env.reset()
-    while True:
+    env.simple_test_case()
+    data = env.benchmark_data()
+    frames = []
+    for t in range(20):
         if RENDER:
-            env.render()
+            f = env.render(mode='rgb_array')
+            frames.append(f)
         a = actor.choose_action(s)
-        s_, r, done = env.step(a)
+        s_, r, done, _ = env.step(a)
+        data = env.benchmark_data(data)
         s = s_
+    env.close()
+    fig, ax = plt.subplots(nrows=1, ncols=len(data), figsize=(12, 3))
+    for i, (k, v) in enumerate(data.items()):
+        if i == 0: continue
+        ax[i].set_title(k)
+        ax[i].plot(np.arange(len(v)), v)
+        ax[i].set_xlabel("time")
+
+    imageio.mimsave('img/video.gif', frames)
+    fig.tight_layout()
+    plt.savefig("img/derivatives.png")
+
+
 
 
 if __name__ == '__main__':

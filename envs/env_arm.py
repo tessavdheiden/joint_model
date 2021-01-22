@@ -40,7 +40,7 @@ class ArmEnv(AbsEnv):
     def __init__(self):
         # node1 (d_rad, x, y),
         # node2 (d_rad, x, y)
-
+        self.name = 'Arm'
         self.state = np.zeros(8)
         self.point_info = np.array([1, 1])
         self.point_info_init = self.point_info.copy()
@@ -62,7 +62,7 @@ class ArmEnv(AbsEnv):
         s, arm2_distance = self._get_obs()
         r = self._r_func(arm2_distance)
 
-        return s, r, self.get_point
+        return s, r, self.get_point, {}
 
     def _reset_arm(self):
         arm1rad, arm2rad = np.random.rand(2) * 2 * np.pi - np.pi
@@ -82,7 +82,7 @@ class ArmEnv(AbsEnv):
     def _get_obs(self):
         arm1rad, arm2rad = self.state[0], self.state[1]
         arm1dx_dy = np.array([self.LINK_LENGTH_1 * cos(arm1rad), self.LINK_LENGTH_1 * sin(arm1rad)])
-        arm2dx_dy = np.array([self.LINK_LENGTH_2 * cos(arm2rad), self.LINK_LENGTH_2 * sin(arm2rad)])
+        arm2dx_dy = np.array([self.LINK_LENGTH_2 * cos(arm1rad + arm2rad), self.LINK_LENGTH_2 * sin(arm1rad + arm2rad)])
         xy1 = self.center_coord + arm1dx_dy  # (x1, y1)
         xy2 = xy1 + arm2dx_dy  # (x2, y2)
 
@@ -90,7 +90,6 @@ class ArmEnv(AbsEnv):
         delta1 = np.ravel(xy1 - self.point_info)
         delta2 = np.ravel(xy2 - self.point_info)
 
-        in_point = 1 if self.grab_counter > 0 else 0
         return np.hstack([delta1, delta2, self.point_info]), delta2
 
     def _r_func(self, distance):
@@ -122,11 +121,11 @@ class ArmEnv(AbsEnv):
 
         p1 = [self.LINK_LENGTH_1 * cos(s[0]), self.LINK_LENGTH_1 * sin(s[0])]
 
-        p2 = [p1[0] + self.LINK_LENGTH_2 * cos(s[1]),
-              p1[1] + self.LINK_LENGTH_2 * sin(s[1])]
+        p2 = [p1[0] + self.LINK_LENGTH_2 * cos(s[0] + s[1]),
+              p1[1] + self.LINK_LENGTH_2 * sin(s[0] + s[1])]
 
         xys = np.array([[0, 0], p1, p2])#[:, ::-1]
-        thetas = [s[0], s[1]]
+        thetas = [s[0], s[0] + s[1]]
         link_lengths = [self.LINK_LENGTH_1, self.LINK_LENGTH_2]
 
         target = self.viewer.draw_circle(.1)
@@ -145,6 +144,34 @@ class ArmEnv(AbsEnv):
             circ.add_attr(jtransform)
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
+
+    def simple_test_case(self):
+        self.point_info = np.array([1, 1])
+        self.state = np.array([np.pi, -np.pi * (3/8)])
+
+    def benchmark_data(self, data={}):
+        if len(data) == 0:
+            data = {'arm2_distance': [],
+                    'velocity_arm2_distance': [None],
+                    'acceleration_arm2_distance': [None, None],
+                    'jerk_arm2_distance': [None, None, None]}
+
+        arm2_distance = self._get_obs()[1]
+        data['arm2_distance'].append(arm2_distance)
+
+        if len(data['arm2_distance']) >= 2:
+            data['velocity_arm2_distance'].append(
+                np.sqrt(np.sum(np.square(data['arm2_distance'][-1] - data['arm2_distance'][-2]))) / self.dt)
+
+        if len(data['velocity_arm2_distance']) >= 3:
+            data['acceleration_arm2_distance'].append(
+                np.sqrt(np.sum(np.square(data['velocity_arm2_distance'][-1] - data['velocity_arm2_distance'][-2]))) / self.dt)
+
+        if len(data['acceleration_arm2_distance']) >= 4:
+            data['jerk_arm2_distance'].append(
+                np.sqrt(np.sum(np.square(data['acceleration_arm2_distance'][-1] - data['acceleration_arm2_distance'][-2]))) / self.dt)
+
+        return data
 
 def angle_normalize(x):
     return (((x+pi) % (2*pi)) - pi)

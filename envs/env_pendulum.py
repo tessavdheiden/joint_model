@@ -10,37 +10,38 @@ MASS = 2.
 DELTA_T = .05
 MAX_TORQUE = 1.
 
+from envs.env_abs import AbsEnv
 
-class PendulumEnv(gym.Env):
+
+class PendulumEnv(AbsEnv):
     metadata = {
         'render.modes': ['human', 'rgb_array'],
         'video.frames_per_second': 30
     }
+    u_low = np.array([-1])
+    u_high = np.array([1])
+    action_space = spaces.Box(
+        low=u_low,
+        high=u_high, shape=(1,),
+        dtype=np.float32
+    )
+    max_speed = 8
+    high = np.array([1., 1., max_speed], dtype=np.float32)
+    observation_space = spaces.Box(
+        low=-high,
+        high=high,
+        dtype=np.float32
+    )
 
     def __init__(self, g=10.0):
         self.name = 'Pendulum'
-        self.max_speed = 8
-        self.u_max = MAX_TORQUE
 
-        self.u_low = np.array([-1])
-        self.u_high = np.array([1])
+        self.u_max = MAX_TORQUE
         self.dt = DELTA_T
         self.g = g
         self.m = MASS
         self.l = 1.
         self.viewer = None
-
-        high = np.array([1., 1., self.max_speed], dtype=np.float32)
-        self.action_space = spaces.Box(
-            low=self.u_low,
-            high=self.u_high, shape=(1,),
-            dtype=np.float32
-        )
-        self.observation_space = spaces.Box(
-            low=-high,
-            high=high,
-            dtype=np.float32
-        )
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
