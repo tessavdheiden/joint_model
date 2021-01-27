@@ -23,3 +23,7 @@ class AbsEnv(gym.Env, ABC):
     def observation_space(self):
         pass
 
+    @abstractmethod
+    def step_batch(self):
+        pass
+
