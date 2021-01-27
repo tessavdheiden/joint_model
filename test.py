@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 from envs.env_pendulum import PendulumEnv
 from controller import Controller
-from policy import Policy
+from policy_train import Policy
 
 
 Transition = namedtuple('Transition', ['s', 'a', 'a_prob',  's_', 'r'])

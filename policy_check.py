@@ -4,7 +4,7 @@ import torch
 
 
 def ppo_heatmap():
-    from policy import ActorNet, CriticNet
+    from policy_train import ActorNet, CriticNet
 
     x_pxl, y_pxl = 300, 400
 

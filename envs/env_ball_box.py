@@ -15,10 +15,10 @@ class BallBoxEnv(AbsEnv):
     dt = .5
     u_low = np.array([-1., -1.])
     u_high = np.array([1., 1.])
-
+    action_dim = 2
     action_space = spaces.Box(
         low=u_low,
-        high=u_high, shape=(2,),
+        high=u_high, shape=(action_dim,),
         dtype=np.float32
     )
     s_max = 1
@@ -29,15 +29,20 @@ class BallBoxEnv(AbsEnv):
     )
 
     def __init__(self):
+        self.seed()
         self.name = 'BallInBox'
         self.viewer = None
+
+    def seed(self, seed=None):
+        self.np_random, seed = seeding.np_random(seed)
+        return [seed]
 
     def step(self, u):
         x = self.state
         u = np.clip(u, self.u_low, self.u_high)
         x += u * self.dt
         self.state = np.clip(x, -self.s_max, self.s_max)
-        return self.state, None, False, {}
+        return self.state, cost, False, {}
 
     def reset(self):
         self.state = self.np_random.uniform(low=-self.s_max, high=self.s_max, size=(2, ))
@@ -62,10 +67,7 @@ class BallBoxEnv(AbsEnv):
             self.ball_transform = rendering.Transform()
             ball.add_attr(self.ball_transform)
             self.viewer.add_geom(ball)
-            self.imgtrans = rendering.Transform()
-            # self.img.add_attr(self.imgtrans)
 
-        # self.viewer.add_onetime(self.img)
         self.ball_transform.set_translation(self.state[0], self.state[1])
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')

@@ -26,7 +26,7 @@ class ArmEnv(AbsEnv):
 
     observation_space = spaces.Box(
         low=-s_max,
-        high=s_max, shape=(6,),
+        high=s_max, shape=(4,),
         dtype=np.float32
     )
     action_dim = 2
@@ -90,7 +90,7 @@ class ArmEnv(AbsEnv):
         delta1 = np.ravel(xy1 - self.point_info)
         delta2 = np.ravel(xy2 - self.point_info)
 
-        return np.hstack([delta1, delta2, self.point_info]), delta2
+        return np.hstack([delta1, delta2]), delta2
 
     def _r_func(self, distance):
         t = 50
@@ -152,24 +152,21 @@ class ArmEnv(AbsEnv):
     def benchmark_data(self, data={}):
         if len(data) == 0:
             data = {'arm2_distance': [],
-                    'velocity_arm2_distance': [None],
-                    'acceleration_arm2_distance': [None, None],
-                    'jerk_arm2_distance': [None, None, None]}
+                    'velocity_arm2_distance': [],
+                    'acceleration_arm2_distance': [],
+                    'jerk_arm2_distance': []}
 
         arm2_distance = self._get_obs()[1]
         data['arm2_distance'].append(arm2_distance)
 
         if len(data['arm2_distance']) >= 2:
-            data['velocity_arm2_distance'].append(
-                np.sqrt(np.sum(np.square(data['arm2_distance'][-1] - data['arm2_distance'][-2]))) / self.dt)
+            data['velocity_arm2_distance'].append(data['arm2_distance'][-1] - data['arm2_distance'][-2])
 
         if len(data['velocity_arm2_distance']) >= 3:
-            data['acceleration_arm2_distance'].append(
-                np.sqrt(np.sum(np.square(data['velocity_arm2_distance'][-1] - data['velocity_arm2_distance'][-2]))) / self.dt)
+            data['acceleration_arm2_distance'].append(data['velocity_arm2_distance'][-1] - data['velocity_arm2_distance'][-2])
 
         if len(data['acceleration_arm2_distance']) >= 4:
-            data['jerk_arm2_distance'].append(
-                np.sqrt(np.sum(np.square(data['acceleration_arm2_distance'][-1] - data['acceleration_arm2_distance'][-2]))) / self.dt)
+            data['jerk_arm2_distance'].append(data['acceleration_arm2_distance'][-1] - data['acceleration_arm2_distance'][-2])
 
         return data
 

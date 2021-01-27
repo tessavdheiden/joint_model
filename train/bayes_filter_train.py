@@ -11,12 +11,7 @@ from filters.bayes_filter_fully_connected import BayesFilterFullyConnected
 from filters.simple_filter import SimpleFilter
 from memory.replay_memory import ReplayMemory
 from controller import Controller
-from envs.env_pendulum import PendulumEnv
-from envs.env_ball_box import BallBoxEnv
-from envs.env_sigmoid import SigmoidEnv
-from envs.env_tanh2d import Tanh2DEnv
-# from envs.env_reacher import ReacherEnv
-from envs.env_arm import ArmEnv
+from envs import *
 from filters.bayes_filter_viz import visualize_latent_space3D, visualize_latent_space2D, visualize_latent_space1D, \
                                 visualize_latent_spaceND, plot_trajectory
 
@@ -85,9 +80,9 @@ parser.add_argument('--n_subseq', type=int, default=4,
                     help='number of subsequences to divide each sequence into')
 parser.add_argument('--env', type=int, default=4,
                     help='0=pendulum, 1=ball in box, 2=sigmoid, 3=tanh, 4=arm')
-parser.add_argument('--filter_type', type=int, default=0,
+parser.add_argument('--filter_type', type=int, default=1,
                     help='0=bayes filter, 1=bayes filter fully connected')
-parser.add_argument('--z_dim', type=int, default=2)
+parser.add_argument('--z_dim', type=int, default=4)
 args = parser.parse_args()
 
 
@@ -119,7 +114,7 @@ if __name__ == '__main__':
     elif args.filter_type == 1:
         bayes_filter = BayesFilterFullyConnected.init_from_replay_memory(replay_memory, u_low=env.u_low, u_high=env.u_high, z_dim=args.z_dim)
 
-    assert bayes_filter.z_dim <= replay_memory.state_dim
+    assert bayes_filter.z_dim == replay_memory.state_dim
 
 
     train(replay_memory, bayes_filter)
