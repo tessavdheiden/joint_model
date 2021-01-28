@@ -15,4 +15,5 @@ import torchdiffeq
 print(f"torchdiffeq=={torchdiffeq.__version__}")
 import argparse
 print(f"argparse=={argparse.__version__}")
-
+import imageio
+print(f"argparse=={imageio.__version__}")

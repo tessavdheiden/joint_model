@@ -36,6 +36,7 @@ class ReacherEnv(AbsEnv):
     )
 
     viewer = None
+    target = None
 
     def __init__(self):
         pass
@@ -142,10 +143,11 @@ class ReacherEnv(AbsEnv):
         thetas = [s[0], s[0] + s[1]]
         link_lengths = [self.LINK_LENGTH_1, self.LINK_LENGTH_2]
 
-        target = self.viewer.draw_circle(.1)
-        target.set_color(8, 0, 0)
-        ttransform = rendering.Transform(translation=(self.target[0], self.target[1]))
-        target.add_attr(ttransform)
+        if self.target:
+            target = self.viewer.draw_circle(.1)
+            target.set_color(8, 0, 0)
+            ttransform = rendering.Transform(translation=(self.target[0], self.target[1]))
+            target.add_attr(ttransform)
 
         for ((x, y), th, llen) in zip(xys, thetas, link_lengths):
             l, r, t, b = 0, llen, .1, -.1
@@ -167,12 +169,11 @@ class Reacher(nn.Module, ReacherEnv):
     def __init__(self):
         super().__init__()
         self.t0 = nn.Parameter(torch.tensor([0.0]))
-        self.init_theta = nn.Parameter(torch.tensor([.0, .0]))
-        self.init_dtheta = nn.Parameter(torch.tensor([.0, .0]))
-        self.init_tau = nn.Parameter(torch.tensor([.0, .0]))
+        self.init_s = nn.Parameter(torch.tensor([.0, .0, .0, .0]))
+        self.init_u = nn.Parameter(torch.tensor([.0, .0]))
 
     def get_initial_state_action(self):
-        state = (self.init_theta, self.init_dtheta, self.init_tau)
+        state = (self.init_s, self.init_u)
         return self.t0, state
 
     def forward(self, t, s):
@@ -181,11 +182,11 @@ class Reacher(nn.Module, ReacherEnv):
         L1 = self.LINK_LENGTH_1
         L2 = self.LINK_LENGTH_2
 
-        theta, dtheta, tau = s
+        s, u = s
 
-        tau1, tau2 = torch.split(tau, 1, dim=0)
-        theta1, theta2 = torch.split(theta, 1, dim=0)
-        dtheta1, dtheta2 = torch.split(dtheta, 1, dim=0)
+        tau1, tau2 = torch.split(u, 1, dim=0)
+        theta1, theta2 = torch.split(s[:2], 1, dim=0)
+        dtheta1, dtheta2 = torch.split(s[2:], 1, dim=0)
 
         # run equations_of_motion() to compute these
         ddtheta1 = (-L1 * torch.cos(theta2) - L2) * (-L1 * L2 * dtheta1 ** 2 * m2 * torch.sin(theta2) + tau2) / (
@@ -203,42 +204,11 @@ class Reacher(nn.Module, ReacherEnv):
         return (dtheta1, dtheta2, ddtheta1, ddtheta2, torch.tensor([0.]), torch.tensor([0.]))
 
     def step_batch(self, x, u):
-        s_aug = (x[0], x[1], u)
+        s_aug = (x, u)
         solution = odeint(self, s_aug, torch.tensor([0, self.dt]), atol=1e-8, rtol=1e-8)
-        return solution
+        state, action = solution
+        return state
 
-    def render(self, mode='human'):
-        from gym.envs.classic_control import rendering
-        from numpy import cos, sin
-        s = self.state
-
-        if self.viewer is None:
-            self.viewer = rendering.Viewer(500, 500)
-            bound = self.LINK_LENGTH_1 + self.LINK_LENGTH_2 + 0.2  # 2.2 for default
-            self.viewer.set_bounds(-bound, bound, -bound, bound)
-
-        if s is None: return None
-
-        p1 = [self.LINK_LENGTH_1 * cos(s[0]), self.LINK_LENGTH_1 * sin(s[0])]
-
-        p2 = [p1[0] + self.LINK_LENGTH_2 * cos(s[0] + s[1]),
-              p1[1] + self.LINK_LENGTH_2 * sin(s[0] + s[1])]
-
-        xys = np.array([[0, 0], p1, p2])#[:, ::-1]
-        thetas = [s[0], s[0] + s[1]]
-        link_lengths = [self.LINK_LENGTH_1, self.LINK_LENGTH_2]
-
-        for ((x, y), th, llen) in zip(xys, thetas, link_lengths):
-            l, r, t, b = 0, llen, .1, -.1
-            jtransform = rendering.Transform(rotation=th, translation=(x, y))
-            link = self.viewer.draw_polygon([(l, b), (l, t), (r, t), (r, b)])
-            link.add_attr(jtransform)
-            link.set_color(0, .8, .8)
-            circ = self.viewer.draw_circle(.1)
-            circ.set_color(.8, .8, 0)
-            circ.add_attr(jtransform)
-
-        return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
 def wrap(x, m, M):
     """Wraps ``x`` so m <= x <= M; but unlike ``bound()`` which
@@ -284,7 +254,6 @@ def rk4(derivs, y0, t, *args, **kwargs):
 
     yout[0] = y0
 
-
     for i in np.arange(len(t) - 1):
 
         thist = t[i]
@@ -325,9 +294,9 @@ def equations_of_motion():
 
 def visualize(t, solution):
     t = t.detach().cpu().numpy()
-    theta = solution[0].detach().cpu().numpy()
-    dtheta = solution[1].detach().cpu().numpy()
-    tau = solution[2].detach().cpu().numpy()
+    state, action = solution
+    theta = state[:, :2].detach().cpu().numpy()
+    dtheta = state[:, 2:].detach().cpu().numpy()
 
     fig = plt.figure(figsize=(8, 4), facecolor='white')
     ax_theta = fig.add_subplot(121, frameon=False)
@@ -354,16 +323,6 @@ def visualize(t, solution):
 
 
 if __name__ == '__main__':
-    # env = ReacherEnv()
-    # env.seed()
-    # env.reset()
-    # for _ in range(100):
-    #     env.render()
-    #     a = env.action_space.sample()
-    #     env.step(a)
-    # env.close()
-    #
-
     import matplotlib.pyplot as plt
     import imageio
 
@@ -371,25 +330,23 @@ if __name__ == '__main__':
     frames = []
 
     for _ in range(32):
-        t0, state = system.get_initial_state_action()
-        system.state = np.array([0, 0, 0, 0])
+        t0, state_action = system.get_initial_state_action()
+        system.state = state_action[0].detach().numpy()
         for _ in range(100):
             a = system.action_space.sample()
-            state = system.state
-            print(state)
-            s = (torch.from_numpy(state[0:2]).float(), torch.from_numpy(state[2:4]).float())
-            solution = system.step_batch(x=s, u=torch.from_numpy(a).float())
-            state = np.hstack((solution[0].detach().cpu().numpy(), solution[1].detach().cpu().numpy()))
-            system.state = state[-1]
+
+            state = system.step_batch(x=torch.from_numpy(system.state).float(), u=torch.from_numpy(a).float())
+            system.state = state[-1].detach().numpy()   # only need last time state
+
             f = system.render(mode='rgb_array')
             frames.append(f)
         break
     imageio.mimsave('../img/video.gif', frames)
 
-    t0, state = system.get_initial_state_action()
+    t0, state_action = system.get_initial_state_action()
     t = torch.linspace(0., 25., 10)
 
-    solution = odeint(system, state, t, atol=1e-8, rtol=1e-8)
+    solution = odeint(system, state_action, t, atol=1e-8, rtol=1e-8)
     visualize(t, solution)
 
 

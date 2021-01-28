@@ -5,3 +5,4 @@ matplotlib==3.3.2
 sympy==1.7.1
 torchdiffeq==0.2.0
 argparse==1.1
+argparse==2.9.0
