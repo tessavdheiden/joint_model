@@ -1,7 +1,6 @@
 import sys
 sys.stdout = open('requirements.txt', 'w')
 
-
 import numpy
 print(f"numpy=={numpy.__version__}")
 import torch
@@ -14,4 +13,6 @@ import sympy
 print(f"sympy=={sympy.__version__}")
 import torchdiffeq
 print(f"torchdiffeq=={torchdiffeq.__version__}")
+import argparse
+print(f"argparse=={argparse.__version__}")
 

@@ -20,6 +20,7 @@ class PendulumEnv(AbsEnv):
     }
     u_low = np.array([-1])
     u_high = np.array([1])
+    action_dim = 1
     action_space = spaces.Box(
         low=u_low,
         high=u_high, shape=(1,),
@@ -42,6 +43,7 @@ class PendulumEnv(AbsEnv):
         self.m = MASS
         self.l = 1.
         self.viewer = None
+        self.seed()
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
