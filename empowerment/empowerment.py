@@ -33,17 +33,14 @@ class Net(nn.Module):
 
 
 class Empowerment(nn.Module):
-    def __init__(self, env, controller, transition_network, use_filter):
+    def __init__(self, env, controller):
         super(Empowerment, self).__init__()
         self.h_dim = 128
         self.action_dim = controller.action_space.shape[0]
-        self.transition = transition_network
-        if use_filter:
-            self.z_dim = transition_network.z_dim
-        else:
-            self.z_dim = env.observation_space.shape[0]
 
         self.env = env
+        self.z_dim = env.observation_space.shape[0]
+
         self.source = Net(self.z_dim, self.action_dim, self.h_dim)
         self.planning = Net(self.z_dim*2, self.action_dim, self.h_dim)
         self.auto_regressive = Net(self.z_dim * 2 + self.action_dim, self.action_dim, self.h_dim)
@@ -52,11 +49,15 @@ class Empowerment(nn.Module):
                                     + list(self.auto_regressive.parameters()), lr=1e-4)
         self.optimizer_source = optim.Adam(self.source.parameters(), lr=1e-5)
         self.planning_steps = 4
-        self.use_filter = use_filter
+        self.use_filter = False
         self.step = env.step_batch
         self.cast = lambda x: x
 
         self.it = 0
+
+    def set_transition(self, transition_network):
+        self.transition = transition_network
+        self.z_dim = transition_network.z_dim
 
     def forward(self, z):
         z = self.cast(z)

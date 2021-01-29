@@ -94,14 +94,19 @@ def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_
     x, e = [], []
     for b in range(replay_memory.n_batches_train):
         batch_dict = replay_memory.next_batch_train()
-        x_in = torch.from_numpy(batch_dict["states"])[:, :bayes_filter.T]
-        u_in = torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1]
-        x.append(x_in)
 
         if args.use_filter:
+            x_in = torch.from_numpy(batch_dict["states"])[:, :bayes_filter.T]
+            u_in = torch.from_numpy(batch_dict['inputs'])[:, :bayes_filter.T - 1]
+            x.append(x_in)
+
             x_, _, z_out, _ = bayes_filter.propagate_solution(x_in, u_in)
             e_out = empowerment(z_out.view(-1, bayes_filter.z_dim))
         else:
+            x_in = torch.from_numpy(batch_dict["states"])[:, :]
+            u_in = torch.from_numpy(batch_dict['inputs'])[:, :-1]
+            x.append(x_in)
+
             e_out = empowerment(x_in.view(-1, x_in.shape[2]))
         e.append(e_out)
 
@@ -110,7 +115,7 @@ def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_
     if args.env == 0:
         x1 = np.arctan2(x[:, 1], x[:, 0])
         x2 = x[:, 2]
-    elif args.env == 5:
+    elif args.env == 4 or args.env == 5:    # arm or reacher
         x1 = x[:, -2]
         x2 = x[:, -1]
     else:

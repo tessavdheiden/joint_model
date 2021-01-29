@@ -8,7 +8,7 @@ from gym import spaces
 from envs.env_abs import AbsEnv
 
 
-class ReacherEnv(AbsEnv):
+class Env(AbsEnv):
     dt = .2
 
     LINK_LENGTH_1 = 1.  # [m]
@@ -28,10 +28,10 @@ class ReacherEnv(AbsEnv):
         dtype=np.float32
     )
 
-    high = np.array([1., 1., 1., 1., 1., 1., 1., 1.], dtype=np.float32)
+    high = np.array([1., 1., 1., 1.], dtype=np.float32)
     observation_space = spaces.Box(
         low=-high,
-        high=high, shape=(8,),
+        high=high, shape=(4,),
         dtype=np.float32
     )
 
@@ -89,7 +89,8 @@ class ReacherEnv(AbsEnv):
         self.state = ns
         terminal = self._terminal()
         reward = -1. if not terminal else 0.
-        return (self._get_ob(), reward, terminal, {})
+        # return (self._get_ob(), reward, terminal, {})
+        return self.state, reward, terminal, {}
 
     def _terminal(self):
         s = self.state
@@ -120,7 +121,8 @@ class ReacherEnv(AbsEnv):
     def reset(self):
         self._reset_target()
         self._reset_state()
-        return self._get_ob()
+        # return self._get_ob()
+        return self.state
 
     def render(self, mode='human'):
         from gym.envs.classic_control import rendering
@@ -165,7 +167,7 @@ class ReacherEnv(AbsEnv):
         pass
 
 
-class Reacher(nn.Module, ReacherEnv):
+class ReacherEnv(nn.Module, Env):
     def __init__(self):
         super().__init__()
         self.t0 = nn.Parameter(torch.tensor([0.0]))
@@ -173,7 +175,7 @@ class Reacher(nn.Module, ReacherEnv):
         self.init_u = nn.Parameter(torch.tensor([.0, .0]))
 
     def get_initial_state_action(self):
-        state = (self.init_s, self.init_u)
+        state = (self.init_s.unsqueeze(0), self.init_u.unsqueeze(0))
         return self.t0, state
 
     def forward(self, t, s):
@@ -184,9 +186,9 @@ class Reacher(nn.Module, ReacherEnv):
 
         s, u = s
 
-        tau1, tau2 = torch.split(u, 1, dim=0)
-        theta1, theta2 = torch.split(s[:2], 1, dim=0)
-        dtheta1, dtheta2 = torch.split(s[2:], 1, dim=0)
+        tau1, tau2 = torch.split(u, 1, dim=1)
+        theta1, theta2 = torch.split(s[:, :2], 1, dim=1)
+        dtheta1, dtheta2 = torch.split(s[:, 2:], 1, dim=1)
 
         # run equations_of_motion() to compute these
         ddtheta1 = (-L1 * torch.cos(theta2) - L2) * (-L1 * L2 * dtheta1 ** 2 * m2 * torch.sin(theta2) + tau2) / (
@@ -201,14 +203,16 @@ class Reacher(nn.Module, ReacherEnv):
                                L1 ** 2 * L2 ** 2 * m1 * m2 - L1 ** 2 * L2 ** 2 * m2 ** 2 * torch.cos(
                            theta2) ** 2 + L1 ** 2 * L2 ** 2 * m2 ** 2)
 
-        return (dtheta1, dtheta2, ddtheta1, ddtheta2, torch.tensor([0.]), torch.tensor([0.]))
+        return (dtheta1, dtheta2, ddtheta1, ddtheta2, torch.zeros_like(tau1), torch.zeros_like(tau2))
 
     def step_batch(self, x, u):
-        s_aug = (x, u)
-        solution = odeint(self, s_aug, torch.tensor([0, self.dt]), atol=1e-8, rtol=1e-8)
-        state, action = solution
-        return state
+        u = torch.max(torch.min(u, torch.tensor([1., 1.])), torch.tensor([-1., -1.]))
 
+        s_aug = (x, u)
+        solution = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')
+        state, action = solution
+
+        return state[-1]
 
 def wrap(x, m, M):
     """Wraps ``x`` so m <= x <= M; but unlike ``bound()`` which
@@ -295,8 +299,8 @@ def equations_of_motion():
 def visualize(t, solution):
     t = t.detach().cpu().numpy()
     state, action = solution
-    theta = state[:, :2].detach().cpu().numpy()
-    dtheta = state[:, 2:].detach().cpu().numpy()
+    theta = state[:, 0, :2].detach().cpu().numpy()
+    dtheta = state[:, 0, 2:].detach().cpu().numpy()
 
     fig = plt.figure(figsize=(8, 4), facecolor='white')
     ax_theta = fig.add_subplot(121, frameon=False)
@@ -326,22 +330,23 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     import imageio
 
-    system = Reacher()
+    system = ReacherEnv()
     frames = []
 
-    for _ in range(32):
-        t0, state_action = system.get_initial_state_action()
-        system.state = state_action[0].detach().numpy()
-        for _ in range(100):
-            a = system.action_space.sample()
-
-            state = system.step_batch(x=torch.from_numpy(system.state).float(), u=torch.from_numpy(a).float())
-            system.state = state[-1].detach().numpy()   # only need last time state
-
-            f = system.render(mode='rgb_array')
-            frames.append(f)
-        break
-    imageio.mimsave('../img/video.gif', frames)
+    # for _ in range(32):
+    #     t0, state_action = system.get_initial_state_action()
+    #     system.state = state_action[0].detach().numpy()
+    #     for _ in range(100):
+    #         a = system.action_space.sample()
+    #
+    #         state = system.step_batch(x=torch.from_numpy(system.state).float().unsqueeze(0),
+    #                                   u=torch.from_numpy(a).float().unsqueeze(0))
+    #         system.state = state.squeeze(0).detach().numpy()   # only need last time state
+    #
+    #         f = system.render(mode='rgb_array')
+    #         frames.append(f)
+    #     break
+    # imageio.mimsave('../img/video.gif', frames)
 
     t0, state_action = system.get_initial_state_action()
     t = torch.linspace(0., 25., 10)

@@ -6,12 +6,7 @@ from collections import namedtuple
 import matplotlib.pyplot as plt
 
 
-from envs.env_pendulum import PendulumEnv
-from envs.env_ball_box import BallBoxEnv
-from envs.env_sigmoid import SigmoidEnv
-from envs.env_tanh2d import Tanh2DEnv
-#from envs.env_reacher import ReacherEnv
-from envs.env_arm import ArmEnv
+from envs import *
 from empowerment.empowerment import Empowerment
 from controller import Controller
 from filters.bayes_filter import BayesFilter
@@ -23,7 +18,7 @@ from empowerment.empowerment_viz import visualize_empowerment_landschape_1D, vis
 Record = namedtuple('Transition', ['ep', 'E'])
 
 
-def train_empowerment(env, empowerment, bayes_filter, replay_memory, args):
+def train_empowerment(env, empowerment, replay_memory, args, bayes_filter=None):
     records = [None] * args.num_epochs
 
     for i in range(args.num_epochs):
@@ -76,7 +71,7 @@ def main():
     parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
                         help='number of subsequences to divide each sequence into')
-    parser.add_argument('--env', type=int, default=0,
+    parser.add_argument('--env', type=int, default=4,
                         help='0=pendulum, 1=ball in box, 2=sigmoid, 3=tanh2d')
     parser.add_argument('--filter_type', type=int, default=1,
                         help='0=bayes filter, 1=bayes filter fully connected')
@@ -105,18 +100,22 @@ def main():
 
     controller = Controller(env)
     replay_memory = ReplayMemory(args, controller=controller, env=env)
-    if args.filter_type == 0:
-        bayes_filter = BayesFilter.init_from_save()
-    elif args.filter_type == 1:
-        bayes_filter = BayesFilterFullyConnected.init_from_save()
-    elif args.filter_type == 2:
-        bayes_filter = SimpleFilter.init_from_save()
 
     # assert bayes_filter.T == replay_memory.seq_length
 
-    empowerment = Empowerment(env, controller=controller, transition_network=bayes_filter, use_filter=args.use_filter)
+    empowerment = Empowerment(env, controller=controller)
+    if args.use_filter:
+        if args.filter_type == 0:
+            bayes_filter = BayesFilter.init_from_save()
+        elif args.filter_type == 1:
+            bayes_filter = BayesFilterFullyConnected.init_from_save()
+        elif args.filter_type == 2:
+            bayes_filter = SimpleFilter.init_from_save()
+        empowerment.set_transition(bayes_filter)
 
-    train_empowerment(env, empowerment, bayes_filter, replay_memory, args)
+        train_empowerment(env, empowerment, replay_memory, args, bayes_filter)
+    else:
+        train_empowerment(env, empowerment, replay_memory, args)
 
 
 if __name__ == '__main__':
