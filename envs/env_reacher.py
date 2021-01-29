@@ -175,7 +175,7 @@ class ReacherEnv(nn.Module, Env):
         self.init_u = nn.Parameter(torch.tensor([.0, .0]))
 
     def get_initial_state_action(self):
-        state = (self.init_s.unsqueeze(0), self.init_u.unsqueeze(0))
+        state = (self.init_s, self.init_u)
         return self.t0, state
 
     def forward(self, t, s):
@@ -333,24 +333,26 @@ if __name__ == '__main__':
     system = ReacherEnv()
     frames = []
 
-    # for _ in range(32):
-    #     t0, state_action = system.get_initial_state_action()
-    #     system.state = state_action[0].detach().numpy()
-    #     for _ in range(100):
-    #         a = system.action_space.sample()
-    #
-    #         state = system.step_batch(x=torch.from_numpy(system.state).float().unsqueeze(0),
-    #                                   u=torch.from_numpy(a).float().unsqueeze(0))
-    #         system.state = state.squeeze(0).detach().numpy()   # only need last time state
-    #
-    #         f = system.render(mode='rgb_array')
-    #         frames.append(f)
-    #     break
-    # imageio.mimsave('../img/video.gif', frames)
+    for _ in range(32):
+        t0, state_action = system.get_initial_state_action()
+        system.state = state_action[0].detach().numpy()
+        for _ in range(100):
+            a = system.action_space.sample()
+
+            state = system.step_batch(x=torch.from_numpy(system.state).float().unsqueeze(0),
+                                      u=torch.from_numpy(a).float().unsqueeze(0))
+            system.state = state.squeeze(0).detach().numpy()   # only need last time state
+
+            f = system.render(mode='rgb_array')
+            frames.append(f)
+        break
+    imageio.mimsave('../img/video.gif', frames)
 
     t0, state_action = system.get_initial_state_action()
     t = torch.linspace(0., 25., 10)
 
+    state, action = state_action
+    state_action = (state.unsqueeze(0), action.unsqueeze(0))
     solution = odeint(system, state_action, t, atol=1e-8, rtol=1e-8)
     visualize(t, solution)
 
