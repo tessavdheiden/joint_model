@@ -113,25 +113,34 @@ def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_
     x = torch.cat(x, dim=0).numpy().reshape(-1, replay_memory.state_dim)
     e = torch.cat(e, dim=0).numpy().reshape(-1)
     if args.env == 'pendulum':
-        x1 = np.arctan2(x[:, 1], x[:, 0])
-        x2 = x[:, 2]
-    elif args.env == 'reacher' or args.env == 'arm':
-        x1 = x[:, -2]
-        x2 = x[:, -1]
+        state_names = ['$\\theta$', '$\\dot{\\theta}$']
+
+        fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(8, 4))
+        c = ax.hexbin(np.arctan2(x[:, 1], x[:, 0]), x[:, 2], gridsize=20, C=e[:], mincnt=1, vmin=e.mean() - .1)
+        fig.colorbar(c, ax=ax)
+
+        ax.set_title(f'Empowerment Landscape, ep = {ep}')
+        ax.set_xlabel(state_names[0])
+        ax.set_ylabel(state_names[1])
+        plt.tight_layout()
+        plt.savefig(f'img/empowerment_landscape.png')
+        plt.close()
     else:
-        x1 = x[:, 0]
-        x2 = x[:, 1]
 
-    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 3))
-    c = ax.hexbin(x1, x2, gridsize=20, C=e[:], mincnt=1, vmin=e.mean() - .1)
+        num_states = x.shape[1] // 2
 
-    fig.colorbar(c, ax=ax)
-    ax.set_title(f'Empowerment Landscape, system = {args.env} ep = {ep}')
-    ax.set_xlabel('$\\dot{\\theta}_1$')
-    ax.set_ylabel('$\\dot{\\theta}_2$')
-    plt.tight_layout()
-    plt.savefig(f'img/empowerment_landscape.png')
-    plt.close()
+        state_names = ['$q_1$', '$q_2$', '$\\dot{q}_1$', '$\\dot{q}_2$']
+        for i in range(num_states):
+            fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(8, 4))
+            c = ax.hexbin(x[:, i * 2], x[:, i * 2 + 1], gridsize=20, C=e[:], mincnt=1, vmin=e.mean() - .1)
+            fig.colorbar(c, ax=ax)
+
+            ax.set_title(f'Empowerment Landscape, ep = {ep}')
+            ax.set_xlabel(state_names[i * 2])
+            ax.set_ylabel(state_names[i * 2 + 1])
+            plt.tight_layout()
+            plt.savefig(f'img/empowerment_landscape_{state_names[i * 2]}_vs_{state_names[i * 2 + 1]}.png')
+        plt.close()
 
 
 def visualize_distributions_2D(empowerment, bayes_filter, replay_memory):

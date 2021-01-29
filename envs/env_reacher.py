@@ -28,9 +28,10 @@ class Env(AbsEnv):
         dtype=np.float32
     )
 
-    high = np.array([np.pi, np.pi, MAX_VEL_1, MAX_VEL_2], dtype=np.float32)
+    high = np.array([2 * np.pi, 2 * np.pi, MAX_VEL_1, MAX_VEL_2], dtype=np.float32)
+    low = np.array([0, 0, -MAX_VEL_1, -MAX_VEL_2], dtype=np.float32)
     observation_space = spaces.Box(
-        low=-high,
+        low=low,
         high=high, shape=(4,),
         dtype=np.float32
     )
@@ -72,6 +73,8 @@ class Env(AbsEnv):
         return (dtheta1, dtheta2, ddtheta1, ddtheta2, 0., 0.)
 
     def step(self, a):
+        def angle_normalize(x):
+            return (((x + pi) % (2 * pi)) - pi)
         from numpy import pi
         s = self.state
         a = np.clip(a, self.u_low, self.u_high)
@@ -81,9 +84,9 @@ class Env(AbsEnv):
         # only care about final timestep of integration returned by integrator
         ns = ns[-1]
         ns = ns[:4]  # omit action
-
-        ns[0] = wrap(ns[0], -pi, pi)
-        ns[1] = wrap(ns[1], -pi, pi)
+        
+        ns[0] = min(max(0, ns[0]), 2*pi)
+        ns[1] = min(max(0, ns[1]), 2*pi)
         ns[2] = bound(ns[2], -self.MAX_VEL_1, self.MAX_VEL_1)
         ns[3] = bound(ns[3], -self.MAX_VEL_2, self.MAX_VEL_2)
         self.state = ns
@@ -113,7 +116,7 @@ class Env(AbsEnv):
         self.target = r * np.array([np.cos(a), np.sin(a)])
 
     def _reset_state(self):
-        theta = np.random.rand(2) * np.pi * 2 - np.pi
+        theta = np.random.rand(2) * np.pi * 2
         dtheta1 = np.random.rand(1) * self.MAX_VEL_1 * 2 - self.MAX_VEL_1
         dtheta2 = np.random.rand(1) * self.MAX_VEL_2 * 2 - self.MAX_VEL_2
         self.state = np.array([theta[0], theta[1], dtheta1[0], dtheta2[0]])
@@ -223,7 +226,9 @@ class ReacherEnv(nn.Module, Env):
 
         vel = torch.cat([vel[:, :1].clamp(max=self.MAX_VEL_1, min=-self.MAX_VEL_1),
                          vel[:, 1:].clamp(max=self.MAX_VEL_2, min=-self.MAX_VEL_2)], dim=1)
-        pos = pos.fmod(torch.ones_like(pos) * np.pi)
+        pos = torch.cat([pos[:, :1].clamp(max=2*np.pi, min=0.),
+                         pos[:, 1:].clamp(max=2*np.pi, min=0.)], dim=1)
+        # pos = pos.fmod(torch.ones_like(pos) * np.pi)
         state = torch.cat((pos, vel), dim=1)
         return state
 
