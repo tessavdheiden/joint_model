@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torchdiffeq import odeint
+from torchdiffeq import odeint, odeint_adjoint
 import numpy as np
 from gym import spaces
 
@@ -28,7 +28,7 @@ class Env(AbsEnv):
         dtype=np.float32
     )
 
-    high = np.array([1., 1., 1., 1.], dtype=np.float32)
+    high = np.array([1., 1., MAX_VEL_1, MAX_VEL_2], dtype=np.float32)
     observation_space = spaces.Box(
         low=-high,
         high=high, shape=(4,),
@@ -173,6 +173,8 @@ class ReacherEnv(nn.Module, Env):
         self.t0 = nn.Parameter(torch.tensor([0.0]))
         self.init_s = nn.Parameter(torch.tensor([.0, .0, .0, .0]))
         self.init_u = nn.Parameter(torch.tensor([.0, .0]))
+        self.u_low_torch = torch.from_numpy(self.u_low).float()
+        self.u_high_torch = torch.from_numpy(self.u_high).float()
 
     def get_initial_state_action(self):
         state = (self.init_s, self.init_u)
@@ -206,13 +208,24 @@ class ReacherEnv(nn.Module, Env):
         return (dtheta1, dtheta2, ddtheta1, ddtheta2, torch.zeros_like(tau1), torch.zeros_like(tau2))
 
     def step_batch(self, x, u):
-        u = torch.max(torch.min(u, torch.tensor([1., 1.])), torch.tensor([-1., -1.]))
+        u = torch.max(torch.min(u, self.u_high_torch), self.u_low_torch)
 
         s_aug = (x, u)
         solution = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')
         state, action = solution
+        state = state[-1] # last time step
+        pos, vel = state[:, :2], state[:, 2:]
 
-        return state[-1]
+        # pos, vel = x[:, :2], x[:, 2:]
+        # vel = vel + u * self.dt
+        # pos = pos + vel * self.dt
+
+        vel = torch.cat([vel[:, :1].clamp(max=self.MAX_VEL_1, min=-self.MAX_VEL_1),
+                         vel[:, 1:].clamp(max=self.MAX_VEL_2, min=-self.MAX_VEL_2)], dim=1)
+        pos = pos.fmod(torch.ones_like(pos) * np.pi)
+        state = torch.cat((pos, vel), dim=1)
+        return state
+
 
 def wrap(x, m, M):
     """Wraps ``x`` so m <= x <= M; but unlike ``bound()`` which

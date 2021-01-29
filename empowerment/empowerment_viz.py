@@ -128,8 +128,9 @@ def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_
         ax.axis('square')
     fig.colorbar(c, ax=ax)
     ax.set_title(f'Empowerment Landscape, ep = {ep}')
-    ax.set_xlabel('x at dim=0')
-    ax.set_ylabel('x at dim=1')
+    ax.set_xlabel('$\\dot{\\theta}_1$')
+    ax.set_ylabel('$\\dot{\\theta}_2$')
+    plt.tight_layout()
     plt.savefig(f'img/empowerment_landscape.png')
     plt.close()
 
