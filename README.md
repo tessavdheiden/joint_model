@@ -1,9 +1,26 @@
 # joint_model
 
-Implementation of Deep Variational Bayes Filter. Example command:
+## Overview
+
+This repository contains various systems for which the empowerment landscape can be computed. 
 
 ```
-python3 bayes_filter_train.py
+python3 train/empowerment_train.py --env 0
 ```
 
-<img width="500" alt="" src="https://user-images.githubusercontent.com/24938569/98122978-93a46000-1eb1-11eb-8c7f-5ed55477a716.png">
+A list of the sytems:
+- 0: Pendulum
+- 1: Ball in box
+- 2: Robot arm
+
+Empowerment can be computed with and without a filter that estimates hidden states. 
+
+```
+python3 train/empowerment_train.py --use_filter 1
+```
+
+Finally, a policy maximizing empowerment can be trained.
+
+```
+python3 train/policy_train.py
+```
