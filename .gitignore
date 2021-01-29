@@ -129,5 +129,6 @@ dmypy.json
 .pyre/
 
 # folders
-img
-param
+img/
+param/
+.idea

@@ -28,7 +28,7 @@ class Env(AbsEnv):
         dtype=np.float32
     )
 
-    high = np.array([1., 1., MAX_VEL_1, MAX_VEL_2], dtype=np.float32)
+    high = np.array([np.pi, np.pi, MAX_VEL_1, MAX_VEL_2], dtype=np.float32)
     observation_space = spaces.Box(
         low=-high,
         high=high, shape=(4,),
@@ -211,6 +211,7 @@ class ReacherEnv(nn.Module, Env):
         u = torch.max(torch.min(u, self.u_high_torch), self.u_low_torch)
 
         s_aug = (x, u)
+
         solution = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')
         state, action = solution
         state = state[-1] # last time step
