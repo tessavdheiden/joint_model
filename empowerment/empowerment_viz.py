@@ -112,10 +112,10 @@ def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_
 
     x = torch.cat(x, dim=0).numpy().reshape(-1, replay_memory.state_dim)
     e = torch.cat(e, dim=0).numpy().reshape(-1)
-    if args.env == 0:
+    if args.env == 'pendulum':
         x1 = np.arctan2(x[:, 1], x[:, 0])
         x2 = x[:, 2]
-    elif args.env == 4 or args.env == 5:    # arm or reacher
+    elif args.env == 'reacher' or args.env == 'arm':
         x1 = x[:, -2]
         x2 = x[:, -1]
     else:
@@ -124,10 +124,9 @@ def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_
 
     fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 3))
     c = ax.hexbin(x1, x2, gridsize=20, C=e[:], mincnt=1, vmin=e.mean() - .1)
-    if args.env == 1 or args.env == 3: # tanh or ball in box
-        ax.axis('square')
+
     fig.colorbar(c, ax=ax)
-    ax.set_title(f'Empowerment Landscape, ep = {ep}')
+    ax.set_title(f'Empowerment Landscape, system = {args.env} ep = {ep}')
     ax.set_xlabel('$\\dot{\\theta}_1$')
     ax.set_ylabel('$\\dot{\\theta}_2$')
     plt.tight_layout()

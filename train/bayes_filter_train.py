@@ -78,8 +78,8 @@ parser.add_argument('--n_trials', type=int, default=2000,
 parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
 parser.add_argument('--n_subseq', type=int, default=4,
                     help='number of subsequences to divide each sequence into')
-parser.add_argument('--env', type=int, default=4,
-                    help='0=pendulum, 1=ball in box, 2=sigmoid, 3=tanh, 4=arm')
+parser.add_argument('--env', type=str, default='pendulum',
+                    help='pendulum, ball_in_box, tanh2d, arm, reacher')
 parser.add_argument('--filter_type', type=int, default=1,
                     help='0=bayes filter, 1=bayes filter fully connected')
 parser.add_argument('--z_dim', type=int, default=4)
@@ -95,15 +95,15 @@ if __name__ == '__main__':
 
     torch.manual_seed(0)
     np.random.seed(0)
-    if args.env == 0:
+    if args.env == 'pendulum':
         env = PendulumEnv()
-    elif args.env == 1:
+    elif args.env == 'ball_in_box':
         env = BallBoxEnv()
-    elif args.env == 2:
-        env = SigmoidEnv()
-    elif args.env == 3:
+    elif args.env == 'tanh2d':
         env = Tanh2DEnv()
-    elif args.env == 4:
+    elif args.env == 'reacher':
+        env = ReacherEnv()
+    elif args.env == 'arm':
         env = ArmEnv()
     env.seed(0)
 
