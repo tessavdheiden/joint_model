@@ -1,8 +1,13 @@
 import numpy as np
 from gym import spaces
 from numpy import sin, cos, pi
+import torch
+
+
 from envs.env_abs import AbsEnv
 
+MODE = "clamp"
+OBS = "sin/cos"
 
 class ArmEnv(AbsEnv):
     '''
@@ -23,12 +28,18 @@ class ArmEnv(AbsEnv):
     )
     s_min = -1
     s_max = 1
-
-    observation_space = spaces.Box(
-        low=-s_max,
-        high=s_max, shape=(4,),
-        dtype=np.float32
-    )
+    if OBS == "angles":
+        observation_space = spaces.Box(
+            low=-s_max,
+            high=s_max, shape=(2,),
+            dtype=np.float32
+        )
+    elif OBS == "sin/cos":
+        observation_space = spaces.Box(
+            low=-s_max,
+            high=s_max, shape=(4,),
+            dtype=np.float32
+        )
     action_dim = 2
 
     LINK_LENGTH_1 = 1
@@ -41,7 +52,7 @@ class ArmEnv(AbsEnv):
         # node1 (d_rad, x, y),
         # node2 (d_rad, x, y)
         self.name = 'Arm'
-        self.state = np.zeros(8)
+        self.state = np.zeros(self.observation_space.shape[0])
         self.point_info = np.array([1, 1])
         self.point_info_init = self.point_info.copy()
         self.center_coord = np.array([0, 0])
@@ -49,23 +60,29 @@ class ArmEnv(AbsEnv):
         self.last_u = np.array([None, None])
         self.viewer = None
 
+        self.u_low_torch = torch.from_numpy(self.u_low).float()
+        self.u_high_torch = torch.from_numpy(self.u_high).float()
+
     def step(self, u):
         # action = (node1 angular v, node2 angular v)
         u = np.clip(u, self.u_low, self.u_high)
 
-        arm1rad = self.state[0]
-        arm2rad = self.state[1]
+        if MODE == "clamp":
+            self.state[0] = np.clip(self.state[0] + u[0] * self.dt, -pi, pi)
+            self.state[1] = np.clip(self.state[1] + u[1] * self.dt, -pi, pi)
+        elif MODE == "wrap":
+            self.state[0] = wrap(self.state[0] + u[0] * self.dt, -pi, pi)
+            self.state[1] = wrap(self.state[1] + u[1] * self.dt, -pi, pi)
 
-        self.state[0] = angle_normalize(arm1rad + u[0] * self.dt)
-        self.state[1] = angle_normalize(arm2rad + u[1] * self.dt)
-
+        assert any(self.state <= pi) & any(self.state >= -pi)
         s, arm2_distance = self._get_obs()
         r = self._r_func(arm2_distance)
 
         return s, r, self.get_point, {}
 
     def _reset_arm(self):
-        arm1rad, arm2rad = np.random.rand(2) * 2 * np.pi - np.pi
+
+        arm1rad, arm2rad = np.random.rand(2) * 2 * pi - pi
         self.state[0] = arm1rad
         self.state[1] = arm2rad
 
@@ -73,7 +90,7 @@ class ArmEnv(AbsEnv):
         self.get_point = False
         self.grab_counter = 0
 
-        angle = np.random.rand(1)[0] * pi * 2
+        angle = np.random.rand(1)[0] * pi * 2 - pi
         radius = np.random.rand(1)[0] * (self.LINK_LENGTH_1 + self.LINK_LENGTH_2)
         self.point_info = radius * np.array([cos(angle), sin(angle)])
         self._reset_arm()
@@ -90,7 +107,11 @@ class ArmEnv(AbsEnv):
         delta1 = np.ravel(xy1 - self.point_info)
         delta2 = np.ravel(xy2 - self.point_info)
 
-        return np.hstack([delta1, delta2]), delta2
+        if OBS == "sin/cos":
+            return np.hstack([cos(self.state[0]), sin(self.state[0]),
+                              cos(self.state[1]), sin(self.state[1])]), delta2
+        elif OBS == "angles":
+            return np.hstack([self.state[0], self.state[1]]), delta2
 
     def _r_func(self, distance):
         t = 50
@@ -145,6 +166,32 @@ class ArmEnv(AbsEnv):
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
+    def step_batch(self, x, u):
+        u = torch.max(torch.min(u, self.u_high_torch), self.u_low_torch)
+
+        if OBS == "angles":
+            theta1 = x[:, 0:1]
+            theta2 = x[:, 1:2]
+        elif OBS == "sin/cos":
+            # -π <= atan2() <= π
+            c1, s1, c2, s2 = x[:, 0:1], x[:, 1:2], x[:, 2:3], x[:, 3:4]
+            theta1 = torch.atan2(s1, c1)
+            theta2 = torch.atan2(s2, c2)
+
+        if MODE == "clamp":
+            theta1 = torch.clamp(theta1 + u[:, :1] * self.dt, min=-pi, max=pi)
+            theta2 = torch.clamp(theta2 + u[:, 1:] * self.dt, min=-pi, max=pi)
+        elif MODE == "wrap":
+            theta1 = angle_normalize(theta1 + u[:, :1] * self.dt)
+            theta2 = angle_normalize(theta2 + u[:, 1:] * self.dt)
+
+        if OBS == "angles":
+            state = torch.cat((theta1, theta2), dim=1)
+        elif OBS == "sin/cos":
+            state = torch.cat((torch.cos(theta1), torch.sin(theta1), torch.cos(theta2), torch.sin(theta2)), dim=1)
+
+        return state
+
     def simple_test_case(self):
         self.point_info = np.array([1, 1])
         self.state = np.array([np.pi, -np.pi * (3/8)])
@@ -170,8 +217,28 @@ class ArmEnv(AbsEnv):
 
         return data
 
+
 def angle_normalize(x):
     return (((x+pi) % (2*pi)) - pi)
+
+
+def wrap(x, m, M):
+    """Wraps ``x`` so m <= x <= M; but unlike ``bound()`` which
+    truncates, ``wrap()`` wraps x around the coordinate system defined by m,M.\n
+    For example, m = -180, M = 180 (degrees), x = 360 --> returns 0.
+    Args:
+        x: a scalar
+        m: minimum possible value in range
+        M: maximum possible value in range
+    Returns:
+        x: a scalar, wrapped
+    """
+    diff = M - m
+    while x > M:
+        x = x - diff
+    while x < m:
+        x = x + diff
+    return x
 
 if __name__ == '__main__':
     env = ArmEnv()

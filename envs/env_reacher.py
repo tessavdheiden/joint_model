@@ -3,21 +3,26 @@ import torch.nn as nn
 from torchdiffeq import odeint, odeint_adjoint
 import numpy as np
 from gym import spaces
+from numpy import pi
 
 
 from envs.env_abs import AbsEnv
 
 
+MODE = "clamp"
+OBS = "angles"
+
+
 class Env(AbsEnv):
-    dt = .2
+    dt = .1
 
     LINK_LENGTH_1 = 1.  # [m]
     LINK_LENGTH_2 = 1.  # [m]
     LINK_MASS_1 = 1.  #: [kg] mass of link 1
     LINK_MASS_2 = 1.  #: [kg] mass of link 2
 
-    MAX_VEL_1 = 4 * np.pi
-    MAX_VEL_2 = 9 * np.pi
+    MAX_VEL_1 = 4 * pi
+    MAX_VEL_2 = 9 * pi
 
     action_dim = 2
     u_low = np.array([-1., -1.])
@@ -28,13 +33,20 @@ class Env(AbsEnv):
         dtype=np.float32
     )
 
-    high = np.array([2 * np.pi, 2 * np.pi, MAX_VEL_1, MAX_VEL_2], dtype=np.float32)
-    low = np.array([0, 0, -MAX_VEL_1, -MAX_VEL_2], dtype=np.float32)
-    observation_space = spaces.Box(
-        low=low,
-        high=high, shape=(4,),
-        dtype=np.float32
-    )
+    if OBS == "angles":
+        high = np.array([pi, pi, MAX_VEL_1, MAX_VEL_2], dtype=np.float32)
+        observation_space = spaces.Box(
+            low=-high,
+            high=high, shape=(4,),
+            dtype=np.float32
+        )
+    elif OBS == "sin/cos":
+        high = np.array([1, 1, 1, 1, MAX_VEL_1, MAX_VEL_2], dtype=np.float32)
+        observation_space = spaces.Box(
+            low=-high,
+            high=high, shape=(6,),
+            dtype=np.float32
+        )
 
     viewer = None
     target = None
@@ -73,10 +85,8 @@ class Env(AbsEnv):
         return (dtheta1, dtheta2, ddtheta1, ddtheta2, 0., 0.)
 
     def step(self, a):
-        def angle_normalize(x):
-            return (((x + pi) % (2 * pi)) - pi)
-        from numpy import pi
         s = self.state
+
         a = np.clip(a, self.u_low, self.u_high)
         s_augmented = np.append(s, a)
 
@@ -84,23 +94,24 @@ class Env(AbsEnv):
         # only care about final timestep of integration returned by integrator
         ns = ns[-1]
         ns = ns[:4]  # omit action
-        
-        ns[0] = min(max(0, ns[0]), 2*pi)
-        ns[1] = min(max(0, ns[1]), 2*pi)
-        ns[2] = bound(ns[2], -self.MAX_VEL_1, self.MAX_VEL_1)
-        ns[3] = bound(ns[3], -self.MAX_VEL_2, self.MAX_VEL_2)
-        self.state = ns
+        if MODE == "reset":
+            if -pi < ns[0] < pi and -pi < ns[1] < pi and -self.MAX_VEL_1 < ns[2] < self.MAX_VEL_1 and -self.MAX_VEL_2 < ns[3] < self.MAX_VEL_2:
+                self.state = ns
+
+        elif MODE == "clamp":
+            ns[0:2] = np.clip(ns[0:2], -pi, pi)
+            ns[2] = np.clip(ns[2], -self.MAX_VEL_1, self.MAX_VEL_1)
+            ns[3] = np.clip(ns[3], -self.MAX_VEL_2, self.MAX_VEL_2)
+            self.state = ns
+
         terminal = self._terminal()
         reward = -1. if not terminal else 0.
-        # return (self._get_ob(), reward, terminal, {})
-        return self.state, reward, terminal, {}
+        return (self._get_ob(), reward, terminal, {})
 
     def _terminal(self):
         s = self.state
-
         xy1 = np.array([self.LINK_LENGTH_1 * np.cos(s[0]), self.LINK_LENGTH_1 * np.sin(s[0])])
         xy2 = xy1 + np.array([self.LINK_LENGTH_2 * np.cos(s[0] + s[1]), self.LINK_LENGTH_2 * np.sin(s[0] + s[1])])
-
         dist = np.sqrt(np.sum(np.square(xy2 - self.target)))
 
         return bool(dist < .1)
@@ -108,15 +119,18 @@ class Env(AbsEnv):
     def _get_ob(self):
         s = self.state
         t = self.target
-        return np.array([np.cos(s[0]), np.sin(s[0]), np.cos(s[1]), np.sin(s[1]), s[2], s[3], t[0], t[1]])
+        if OBS == "sin/cos":
+            return np.array([np.cos(s[0]), np.sin(s[0]), np.cos(s[1]), np.sin(s[1]), s[2], s[3]])
+        elif OBS == "angles":
+            return np.array([s[0], s[1], s[2], s[3]])
 
     def _reset_target(self):
-        a = np.random.rand(1)[0] * np.pi * 2
+        a = np.random.rand(1)[0] * pi * 2
         r = np.random.rand(1)[0] * (self.LINK_LENGTH_1 + self.LINK_LENGTH_2)
         self.target = r * np.array([np.cos(a), np.sin(a)])
 
     def _reset_state(self):
-        theta = np.random.rand(2) * np.pi * 2
+        theta = np.random.rand(2) * pi * 2 - pi
         dtheta1 = np.random.rand(1) * self.MAX_VEL_1 * 2 - self.MAX_VEL_1
         dtheta2 = np.random.rand(1) * self.MAX_VEL_2 * 2 - self.MAX_VEL_2
         self.state = np.array([theta[0], theta[1], dtheta1[0], dtheta2[0]])
@@ -124,8 +138,7 @@ class Env(AbsEnv):
     def reset(self):
         self._reset_target()
         self._reset_state()
-        # return self._get_ob()
-        return self.state
+        return self._get_ob()
 
     def render(self, mode='human'):
         from gym.envs.classic_control import rendering
@@ -178,6 +191,7 @@ class ReacherEnv(nn.Module, Env):
         self.init_u = nn.Parameter(torch.tensor([.0, .0]))
         self.u_low_torch = torch.from_numpy(self.u_low).float()
         self.u_high_torch = torch.from_numpy(self.u_high).float()
+        self.seed(1)
 
     def get_initial_state_action(self):
         state = (self.init_s, self.init_u)
@@ -213,23 +227,44 @@ class ReacherEnv(nn.Module, Env):
     def step_batch(self, x, u):
         u = torch.max(torch.min(u, self.u_high_torch), self.u_low_torch)
 
+        if OBS == "sin/cos":
+            pos, vel = x[:, :4], x[:, 4:]
+            pos = torch.cat((torch.atan2(pos[:, 1:2], pos[:, 0:1]), torch.atan2(pos[:, 3:4], pos[:, 2:3])), dim=1)
+            x = torch.cat((pos, vel), dim=1)
+        elif OBS == "angles":
+            pos, vel = x[:, :2], x[:, 2:]
         s_aug = (x, u)
 
         solution = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')
         state, action = solution
         state = state[-1] # last time step
-        pos, vel = state[:, :2], state[:, 2:]
 
-        # pos, vel = x[:, :2], x[:, 2:]
-        # vel = vel + u * self.dt
-        # pos = pos + vel * self.dt
+        npos, nvel = state[:, :2], state[:, 2:]
+        if MODE == "clamp":
+            vel = torch.cat([nvel[:, :1].clamp(max=self.MAX_VEL_1, min=-self.MAX_VEL_1),
+                             nvel[:, 1:].clamp(max=self.MAX_VEL_2, min=-self.MAX_VEL_2)], dim=1)
+            pos = npos.clamp(max=pi, min=-pi)
 
-        vel = torch.cat([vel[:, :1].clamp(max=self.MAX_VEL_1, min=-self.MAX_VEL_1),
-                         vel[:, 1:].clamp(max=self.MAX_VEL_2, min=-self.MAX_VEL_2)], dim=1)
-        pos = torch.cat([pos[:, :1].clamp(max=2*np.pi, min=0.),
-                         pos[:, 1:].clamp(max=2*np.pi, min=0.)], dim=1)
-        # pos = pos.fmod(torch.ones_like(pos) * np.pi)
-        state = torch.cat((pos, vel), dim=1)
+        elif MODE == "reset":
+            mask_l1 = (nvel[:, :1] < self.MAX_VEL_1) & (nvel[:, :1] > -self.MAX_VEL_1) & (npos[:, :1] < pi) & (npos[:, :1] > -pi)
+            mask_l2 = (nvel[:, 1:] < self.MAX_VEL_2) & (nvel[:, 1:] > -self.MAX_VEL_2) & (npos[:, 1:] < pi) & (npos[:, 1:] > -pi)
+            mask_l1 = mask_l1.squeeze(1)
+            mask_l2 = mask_l2.squeeze(1)
+
+            pos = pos.clone()
+            vel = vel.clone()
+            pos[mask_l1, :1] = npos[mask_l1, :1]
+            pos[mask_l2, 1:] = npos[mask_l2, 1:]
+            vel[mask_l1, :1] = nvel[mask_l1, :1]
+            vel[mask_l2, 1:] = nvel[mask_l2, 1:]
+
+        if OBS == "angles":
+            state = torch.cat((pos, vel), dim=1)
+        elif OBS == "sin/cos":
+            state = torch.cat((torch.cos(pos[:, 0:1]), torch.sin(pos[:, 0:1]),
+                               torch.cos(pos[:, 1:2]), torch.sin(pos[:, 1:2]),
+                               vel[:, 0:1], vel[:, 1:2]), dim=1)
+
         return state
 
 

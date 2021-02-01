@@ -35,7 +35,7 @@ MEMORY_CAPACITY = 5000
 BATCH_SIZE = 16
 VAR_MIN = 0.1
 RENDER = True
-LOAD = False
+LOAD = True
 MODE = ['easy', 'hard']
 n_model = 1
 
@@ -200,7 +200,6 @@ sess = tf.compat.v1.Session()
 actor = Actor(sess, ACTION_DIM, ACTION_BOUND[1], LR_A, REPLACE_ITER_A)
 critic = Critic(sess, STATE_DIM, ACTION_DIM, LR_C, GAMMA, REPLACE_ITER_C, actor.a, actor.a_)
 actor.add_grad_to_graph(critic.a_grads)
-rl = DDPG(ACTION_DIM, STATE_DIM, ACTION_BOUND[1], soft_replace=True, tau=.002, gamma=.8, lr=0.0001, )
 
 
 M = Memory(MEMORY_CAPACITY, dims=2 * STATE_DIM + ACTION_DIM + 1)
@@ -272,7 +271,7 @@ def eval():
     env.simple_test_case()
     data = env.benchmark_data()
     frames = []
-    for t in range(20):
+    for t in range(100):
         if RENDER:
             f = env.render(mode='rgb_array')
             frames.append(f)

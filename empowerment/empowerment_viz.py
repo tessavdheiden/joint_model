@@ -125,8 +125,36 @@ def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_
         plt.tight_layout()
         plt.savefig(f'img/empowerment_landscape.png')
         plt.close()
-    else:
+    elif args.env == 'arm':
+        state_names = ['$\\theta_1$', '$\\theta_2$']
 
+        fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(8, 4))
+        c = ax.hexbin(np.arctan2(x[:, 1], x[:, 0]), np.arctan2(x[:, 3], x[:, 2]), gridsize=20, C=e[:], mincnt=1, vmin=e.mean() - .1)
+        # c = ax.hexbin(x[:, 0], x[:, 1], gridsize=20, C=e[:], mincnt=1, vmin=e.mean() - .1)
+        fig.colorbar(c, ax=ax)
+
+        ax.set_title(f'Empowerment Landscape, ep = {ep}')
+        ax.set_xlabel(state_names[0])
+        ax.set_ylabel(state_names[1])
+        plt.tight_layout()
+        plt.savefig(f'img/empowerment_landscape.png')
+        plt.close()
+    elif args.env == 'reacher':
+        if x.shape[1] == 4:
+            state_names = ['$\\theta_1$', '$\\theta_2$', '$\\dot{\\theta}_1$', '$\\dot{\\theta}_2$']
+            num_states = x.shape[1] // 2
+            for i in range(num_states):
+                fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(8, 4))
+                c = ax.hexbin(x[:, i * 2], x[:, i * 2 + 1], gridsize=20, C=e[:], mincnt=1, vmin=e.mean() - .1)
+                fig.colorbar(c, ax=ax)
+
+                ax.set_title(f'Empowerment Landscape, ep = {ep}')
+                ax.set_xlabel(state_names[i * 2])
+                ax.set_ylabel(state_names[i * 2 + 1])
+                plt.tight_layout()
+                plt.savefig(f'img/empowerment_landscape_x[{i}]_vs_x[{i+1}].png')
+        plt.close()
+    else:
         num_states = x.shape[1] // 2
 
         state_names = ['$q_1$', '$q_2$', '$\\dot{q}_1$', '$\\dot{q}_2$']
