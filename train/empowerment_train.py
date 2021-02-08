@@ -71,8 +71,8 @@ def main():
     parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
                         help='number of subsequences to divide each sequence into')
-    parser.add_argument('--env', type=str, default='reacher',
-                        help='pendulum, ball_in_box, tanh2d, arm, reacher')
+    parser.add_argument('--env', type=str, default='controlled_reacher',
+                        help='pendulum, ball_in_box, tanh2d, arm, reacher, controlled_reacher')
     parser.add_argument('--filter_type', type=int, default=1,
                         help='0=bayes filter, 1=bayes filter fully connected')
     parser.add_argument('--use_filter', type=int, default=0,
@@ -94,6 +94,8 @@ def main():
         env = ReacherEnv()
     elif args.env == 'arm':
         env = ArmEnv()
+    elif args.env == 'controlled_reacher':
+        env = ReacherControlledEnv()
     env.seed(0)
 
     controller = Controller(env)
