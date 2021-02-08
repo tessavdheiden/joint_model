@@ -34,10 +34,10 @@ class Env(AbsEnv):
         dtype=np.float32
     )
     # 2 angles, 2 angular vel, 2 angle errors, 2 vel errors, 2 p's, 2 d's
-    high = np.array([pi, pi, MAX_VEL_1, MAX_VEL_2, pi, pi, 1., 1., 1., 1.], dtype=np.float32)
+    high = np.array([1, 1, 1, 1, MAX_VEL_1, MAX_VEL_2, pi, pi, 1., 1., 1., 1.], dtype=np.float32)
     observation_space = spaces.Box(
         low=-high,
-        high=high, shape=(10,),
+        high=high, shape=(12,),
         dtype=np.float32
     )
     viewer = None
@@ -89,10 +89,10 @@ class Env(AbsEnv):
 
         dp1, dp2, dd1, dd2 = a[0], a[1], a[2], a[3]
 
-        self.p[0] += dp1 * self.dt
-        self.p[1] += dp2 * self.dt
-        self.d[0] += dd1 * self.dt
-        self.d[1] += dd2 * self.dt
+        self.p[0] = np.clip(self.p[0] + dp1 * self.dt, 0, 1)
+        self.p[1] = np.clip(self.p[1] + dp2 * self.dt, 0, 1)
+        self.d[0] = np.clip(self.d[0] + dd1 * self.dt, 0, 1)
+        self.d[1] = np.clip(self.d[1] + dd2 * self.dt, 0, 1)
 
         tau1 = self.p[0] * deltaP[0] + self.d[0] * deltaV[0]
         tau2 = self.p[1] * deltaP[1] + self.d[1] * deltaV[1]
@@ -106,8 +106,8 @@ class Env(AbsEnv):
         ns = ns[:4]  # omit action
 
         # new angle
-        ns[0] = angle_normalize(ns[0])
-        ns[1] = angle_normalize(ns[1])
+        # ns[0] = angle_normalize(ns[0])
+        # ns[1] = angle_normalize(ns[1])
         ns[2] = np.clip(ns[2], -self.MAX_VEL_1, self.MAX_VEL_1)
         ns[3] = np.clip(ns[3], -self.MAX_VEL_2, self.MAX_VEL_2)
         self.state = ns
@@ -117,11 +117,12 @@ class Env(AbsEnv):
         return obs, r, self.get_point, {}
 
     def _get_obs(self):
-        deltaP = np.ravel(self.target - self.state[:2])
-        deltaV = np.ravel(- self.state[2:])
-        return np.hstack([self.state[0], self.state[1], self.state[2], self.state[3],
-                          #deltaP[0], deltaP[1], deltaV[0], deltaV[1],
-                          self.target[0], self.target[1],
+        deltaP = self.target - self.state[:2]
+        deltaV = -self.state[2:]
+        return np.hstack([np.cos(self.state[0]), np.sin(self.state[0]),
+                          np.cos(self.state[1]), np.sin(self.state[1]),
+                          self.state[2], self.state[3],
+                          self.target[0]-self.state[0], self.target[1]-self.state[1],
                           self.p[0], self.p[1], self.d[0], self.d[1]]), deltaP, deltaV
 
     def _r_func(self, distance):
@@ -144,17 +145,14 @@ class Env(AbsEnv):
 
     def _reset_state(self):
         theta = np.random.rand(2) * pi * 2 - pi
-        # dtheta1 = np.random.rand(1) * self.MAX_VEL_1 * 2 - self.MAX_VEL_1
-        # dtheta2 = np.random.rand(1) * self.MAX_VEL_2 * 2 - self.MAX_VEL_2
-        dtheta1 = np.random.rand(1) * .2 - .1
-        dtheta2 = np.random.rand(1) * .2 - .1
-        self.state = np.array([theta[0], theta[1], dtheta1[0], dtheta2[0]])
+        dtheta = np.zeros(2)
+        self.state = np.array([theta[0], theta[1], dtheta[0], dtheta[1]])
 
     def reset(self):
         self.get_point = False
         self.grab_counter = 0
-        self.p = np.random.rand(2) * 2 - 1
-        self.d = np.random.rand(2) * 2 - 1
+        self.p = np.random.rand(2)
+        self.d = np.random.rand(2)
         self._reset_target()
         self._reset_state()
         return self._get_obs()[0]
@@ -281,43 +279,45 @@ class ReacherControlledEnv(nn.Module, Env):
     def step_batch(self, x, u):
         u = torch.max(torch.min(u, self.u_high_torch), self.u_low_torch)
 
-        # return np.hstack([self.state[0], self.state[1], self.state[2], self.state[3],
-        #                   self.target[0], self.target[1],
-        #                   self.p[0], self.p[1], self.d[0], self.d[1]]), deltaP, deltaV
-        state = x[:, :4]
-        target = x[:, 4:6]
-        deltaP = target - state[:, :2]
-        deltaV = state[:, 2:]
-        p = x[:, 6:8]
-        d = x[:, 8:10]
+        pos, vel = x[:, :4], x[:, 4:6]
+        angle = torch.cat((torch.atan2(pos[:, 1:2], pos[:, 0:1]), torch.atan2(pos[:, 3:4], pos[:, 2:3])), dim=1)
+
+        deltaP = x[:, 6:8]
+        #deltaP = target - angle
+        target = deltaP + angle
+        deltaV = -vel
+        p = x[:, 8:10]
+        d = x[:, 10:12]
 
         dp1, dp2, dd1, dd2 = u[:, 0:1], u[:, 1:2], u[:, 2:3], u[:, 3:4]
 
         p_, d_ = p.clone(), d.clone()
-        p_[:, 0:1] = p[:, 0:1] + dp1 * self.dt
-        p_[:, 1:2] = p[:, 1:2] + dp2 * self.dt
-        d_[:, 0:1] = d[:, 0:1] + dd1 * self.dt
-        d_[:, 1:2] = d[:, 1:2] + dd2 * self.dt
+        p_[:, 0:1] = torch.clamp(p[:, 0:1] + dp1 * self.dt, 0, 1)
+        p_[:, 1:2] = torch.clamp(p[:, 1:2] + dp2 * self.dt, 0, 1)
+        d_[:, 0:1] = torch.clamp(d[:, 0:1] + dd1 * self.dt, 0, 1)
+        d_[:, 1:2] = torch.clamp(d[:, 1:2] + dd2 * self.dt, 0, 1)
 
         tau1 = p[:, 0:1] * deltaP[:, 0:1] + d[:, 0:1] * deltaV[:, 0:1]
         tau2 = p[:, 1:2] * deltaP[:, 1:2] + d[:, 1:2] * deltaV[:, 1:2]
         torque = torch.cat((tau1, tau2), dim=1)
         torque = torch.clamp(torque, -self.MAX_TORQUE, self.MAX_TORQUE)
 
-        s_aug = (state, torque)
+        s_aug = (torch.cat((angle, vel), dim=1), torque)
 
         solution = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')
         state, action = solution
         state = state[-1] # last time step
 
-        npos, nvel = state[:, :2], state[:, 2:]
+        ang_, vel_ = state[:, :2], state[:, 2:]
 
-        vel = torch.cat([nvel[:, :1].clamp(max=self.MAX_VEL_1, min=-self.MAX_VEL_1),
-                         nvel[:, 1:].clamp(max=self.MAX_VEL_2, min=-self.MAX_VEL_2)], dim=1)
-        pos = npos.clamp(max=pi, min=-pi)
-
-        state = torch.cat((pos[:, 0:1], pos[:, 1:2], vel[:, 0:1], vel[:, 1:2],
-                           target[:, 0:1], target[:, 1:2],
+        vel_ = torch.cat([vel_[:, :1].clamp(max=self.MAX_VEL_1, min=-self.MAX_VEL_1),
+                         vel_[:, 1:].clamp(max=self.MAX_VEL_2, min=-self.MAX_VEL_2)], dim=1)
+        pos_ = torch.cat((torch.cos(ang_[:, 0:1]), torch.sin(ang_[:, 0:1]),
+                          torch.cos(ang_[:, 1:2]), torch.sin(ang_[:, 1:2])), dim=1)
+        deltaP_ = target-ang_
+        state = torch.cat((pos_[:, 0:1], pos_[:, 1:2], pos_[:, 2:3], pos_[:, 3:4],
+                           vel_[:, 0:1], vel_[:, 1:2],
+                           deltaP_[:, 0:1], deltaP_[:, 1:2],
                            p_[:, 0:1], p_[:, 1:2], d_[:, 0:1], d_[:, 1:2]), dim=1)
 
         return state

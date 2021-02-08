@@ -140,9 +140,14 @@ def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_
         plt.savefig(f'img/empowerment_landscape.png')
         plt.close()
     elif args.env == 'reacher' or args.env == 'controlled_reacher':
+        x[:, 0:1] = np.arctan2(x[:, 1:2], x[:, 0:1])
+        x[:, 1:2] = np.arctan2(x[:, 3:4], x[:, 2:3])
+        x[:, 2:10] = x[:, 4:12]
 
-        state_names = ['$\\theta_1$', '$\\theta_2$', '$\\dot{\\theta}_1$', '$\\dot{\\theta}_2$']
-        num_states = 2
+        state_names = ['$\\theta_1$', '$\\theta_2$', '$\\dot{\\theta}_1$', '$\\dot{\\theta}_2$',
+                       '$\Delta \\theta_1$', '$\Delta \\theta_2$',
+                       '$P_1$', '$P_2$', '$D_1$', '$D_2$']
+        num_states = 5 if 'controlled' in args.env else 2
         for i in range(num_states):
             fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(8, 4))
             c = ax.hexbin(x[:, i * 2], x[:, i * 2 + 1], gridsize=20, C=e[:], mincnt=1, vmin=e.mean() - .1)
