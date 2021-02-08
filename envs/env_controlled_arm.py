@@ -6,12 +6,9 @@ import torch
 
 from envs.env_abs import AbsEnv
 
-MODE = "wrap"
-OBS = "angles"
-TARGET = "angles"
 
 
-class ArmEnv(AbsEnv):
+class ArmControlledEnv(AbsEnv):
     '''
     [cos(theta1) sin(theta1) cos(theta2) sin(theta2) thetaDot1 thetaDot2]
     '''
@@ -30,18 +27,12 @@ class ArmEnv(AbsEnv):
     )
     s_min = -1
     s_max = 1
-    if OBS == "angles":
-        observation_space = spaces.Box(
-            low=-s_max,
-            high=s_max, shape=(4,),
-            dtype=np.float32
-        )
-    elif OBS == "sin/cos":
-        observation_space = spaces.Box(
-            low=-s_max,
-            high=s_max, shape=(6,),
-            dtype=np.float32
-        )
+    observation_space = spaces.Box(
+        low=-s_max,
+        high=s_max, shape=(6,),
+        dtype=np.float32
+    )
+
     action_dim = 2
 
     LINK_LENGTH_1 = 1
@@ -55,8 +46,8 @@ class ArmEnv(AbsEnv):
         # node2 (d_rad, x, y)
         self.name = 'Arm'
         self.state = np.zeros(self.observation_space.shape[0])
-        self.point_info = np.array([1, 1])
-        self.point_info_init = self.point_info.copy()
+        self.target = np.array([1, 1])
+        self.point_info_init = self.target.copy()
         self.center_coord = np.array([0, 0])
 
         self.last_u = np.array([None, None])
@@ -69,12 +60,10 @@ class ArmEnv(AbsEnv):
         # action = (node1 angular v, node2 angular v)
         u = np.clip(u, self.u_low, self.u_high)
 
-        if MODE == "clamp":
-            self.state[0] = np.clip(self.state[0] + u[0] * self.dt, -pi, pi)
-            self.state[1] = np.clip(self.state[1] + u[1] * self.dt, -pi, pi)
-        elif MODE == "wrap":
-            self.state[0] = angle_normalize(self.state[0] + u[0] * self.dt)
-            self.state[1] = angle_normalize(self.state[1] + u[1] * self.dt)
+        delta = self.target - self.state[:2]
+        self.p += u * self.dt
+        self.state[0] = angle_normalize(self.state[0] + self.p[0] * delta[0])
+        self.state[1] = angle_normalize(self.state[1] + self.p[1] * delta[1])
 
         assert any(self.state <= pi) & any(self.state >= -pi)
 
@@ -88,43 +77,21 @@ class ArmEnv(AbsEnv):
         self.state[1] = arm2rad
 
     def _reset_target(self):
-        if TARGET == "positions":
-            angle = np.random.rand(1)[0] * pi * 2 - pi
-            radius = np.random.rand(1)[0] * (self.LINK_LENGTH_1 + self.LINK_LENGTH_2)
-            self.point_info = radius * np.array([cos(angle), sin(angle)])
-        elif TARGET == "angles":
-            self.point_info = np.random.rand(2) * pi * 2 - pi
+        self.target = np.random.rand(2) * pi * 2 - pi
 
     def reset(self):
         self.get_point = False
         self.grab_counter = 0
-
+        self.p = np.random.rand(2) * 2. - 1.
         self._reset_target()
         self._reset_arm()
         return self._get_obs()[0]
 
     def _get_obs(self):
-        arm1rad, arm2rad = self.state[0], self.state[1]
-        arm1dx_dy = np.array([self.LINK_LENGTH_1 * cos(arm1rad), self.LINK_LENGTH_1 * sin(arm1rad)])
-        arm2dx_dy = np.array([self.LINK_LENGTH_2 * cos(arm1rad + arm2rad), self.LINK_LENGTH_2 * sin(arm1rad + arm2rad)])
-        xy1 = self.center_coord + arm1dx_dy  # (x1, y1)
-        xy2 = xy1 + arm2dx_dy  # (x2, y2)
 
-        # return the distance (dx, dy) between arm finger point with blue point
-        if TARGET == "positions":
-            delta2 = np.ravel(xy2 - self.point_info)
-        elif TARGET == "angles":
-            delta2 = np.ravel(self.state[:2] - self.point_info)
-            # delta2[0] = angle_normalize(delta2[0])
-            # delta2[1] = angle_normalize(delta2[1])
-
-        if OBS == "sin/cos":
-            return np.hstack([arm1dx_dy[0], arm1dx_dy[1],
-                              arm2dx_dy[0], arm2dx_dy[1],
-                              arm2dx_dy[0] - self.point_info[0], arm2dx_dy[1]-self.point_info[1]]), delta2
-        elif OBS == "angles":
-            return np.hstack([self.state[0], self.state[1],
-                              self.point_info[0], self.point_info[1]]), delta2
+        delta = np.ravel(self.target - self.state[:2])
+        return np.hstack([self.state[0], self.state[1],
+                          delta[0], delta[1], self.p[0], self.p[1]]), delta
 
     def _r_func(self, distance):
         t = 50
@@ -172,28 +139,22 @@ class ArmEnv(AbsEnv):
             circ.set_color(.8, .8, 0)
             circ.add_attr(jtransform)
 
-        if TARGET == "positions":
-            target = self.viewer.draw_circle(.1)
-            target.set_color(8, 0, 0)
-            ttransform = rendering.Transform(translation=(self.point_info[0], self.point_info[1]))
-            target.add_attr(ttransform)
-        elif TARGET == "angles":
-            pt = self.point_info
-            pt1 = [self.LINK_LENGTH_1 * cos(pt[0]), self.LINK_LENGTH_1 * sin(pt[0])]
-            pt2 = [p1[0] + self.LINK_LENGTH_2 * cos(pt[0] + pt[1]),
-                   p1[1] + self.LINK_LENGTH_2 * sin(pt[0] + pt[1])]
-            xys = np.array([[0, 0], pt1, pt2])  # [:, ::-1]
-            thetas = [pt[0], pt[0] + pt[1]]
-            link_lengths = [self.LINK_LENGTH_1, self.LINK_LENGTH_2]
-            for ((x, y), th, llen) in zip(xys, thetas, link_lengths):
-                l, r, t, b = 0, llen, .1, -.1
-                jtransform = rendering.Transform(rotation=th, translation=(x, y))
-                link = self.viewer.draw_polygon([(l, b), (l, t), (r, t), (r, b)])
-                link.add_attr(jtransform)
-                link._color.vec4 = (0, .8, .8, .2)
-                circ = self.viewer.draw_circle(.1)
-                circ._color.vec4 = (.8, .8, 0, .2)
-                circ.add_attr(jtransform)
+        pt = self.target
+        pt1 = [self.LINK_LENGTH_1 * cos(pt[0]), self.LINK_LENGTH_1 * sin(pt[0])]
+        pt2 = [p1[0] + self.LINK_LENGTH_2 * cos(pt[0] + pt[1]),
+               p1[1] + self.LINK_LENGTH_2 * sin(pt[0] + pt[1])]
+        xys = np.array([[0, 0], pt1, pt2])  # [:, ::-1]
+        thetas = [pt[0], pt[0] + pt[1]]
+        link_lengths = [self.LINK_LENGTH_1, self.LINK_LENGTH_2]
+        for ((x, y), th, llen) in zip(xys, thetas, link_lengths):
+            l, r, t, b = 0, llen, .1, -.1
+            jtransform = rendering.Transform(rotation=th, translation=(x, y))
+            link = self.viewer.draw_polygon([(l, b), (l, t), (r, t), (r, b)])
+            link.add_attr(jtransform)
+            link._color.vec4 = (0, .8, .8, .2)
+            circ = self.viewer.draw_circle(.1)
+            circ._color.vec4 = (.8, .8, 0, .2)
+            circ.add_attr(jtransform)
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
@@ -268,7 +229,7 @@ def wrap(x, m, M):
     return x
 
 if __name__ == '__main__':
-    env = ArmEnv()
+    env = ArmControlledEnv()
     env.seed()
 
     for _ in range(32):

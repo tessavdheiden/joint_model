@@ -268,7 +268,6 @@ def train():
 def eval():
     import imageio
     s = env.reset()
-    env.simple_test_case()
     data = env.benchmark_data()
     frames = []
     for t in range(100):
