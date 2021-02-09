@@ -42,7 +42,7 @@ def train_empowerment(env, empowerment, replay_memory, args, bayes_filter=None):
                 if replay_memory.state_dim == 1:
                     visualize_empowerment_landschape_1D(empowerment, bayes_filter, replay_memory, ep=i)
                 else:
-                    visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_memory, ep=i)
+                    visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_memory, env, ep=i)
                 empowerment.prepare_update()
 
         records[i] = Record(i, E.mean())
@@ -66,7 +66,7 @@ def main():
     parser.add_argument('--seq_length', type=int, default=32, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
     parser.add_argument('--num_epochs', type=int, default=1001, help='number of epochs')
-    parser.add_argument('--n_trials', type=int, default=2000,
+    parser.add_argument('--n_trials', type=int, default=2500,
                         help='number of data sequences to collect in each episode')
     parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,

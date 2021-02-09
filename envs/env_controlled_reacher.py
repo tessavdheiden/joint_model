@@ -20,7 +20,8 @@ class Env(AbsEnv):
     MAX_VEL_1 = 4 * pi
     MAX_VEL_2 = 9 * pi
 
-    MAX_GAIN = 1.
+    MAX_GAIN_P = 1.
+    MAX_GAIN_D = 6.
     MAX_GAIN_CHANGE = 1.
 
     MAX_TORQUE = 1.
@@ -33,10 +34,14 @@ class Env(AbsEnv):
         high=u_high, shape=(action_dim,),
         dtype=np.float32
     )
-    # 2 angles, 2 angular vel, 2 angle errors, 2 vel errors, 2 p's, 2 d's
-    high = np.array([1, 1, 1, 1, MAX_VEL_1, MAX_VEL_2, pi, pi, 1., 1., 1., 1.], dtype=np.float32)
+
+    # cos/sin of 2 angles, 2 angular vel, 2 angle errors, 2 vel errors, 2 p's, 2 d's
+    high = np.array([1, 1, 1, 1, MAX_VEL_1, MAX_VEL_2, pi, pi, MAX_GAIN_P, MAX_GAIN_P, MAX_GAIN_D, MAX_GAIN_D], dtype=np.float32)
+    low = np.array([-1, -1, -1, -1, -MAX_VEL_1, -MAX_VEL_2, -pi, -pi, 0, 0, 0, 0], dtype=np.float32)
+    state_names = ['$\\theta_1$', '$\\theta_2$', '$\\dot{\\theta}_1$', '$\\dot{\\theta}_2$', '$\Delta\\theta_1$',
+                   '$\Delta\\theta_2$', '$P_1$', '$P_2$', '$D_1$', '$D_2$']
     observation_space = spaces.Box(
-        low=-high,
+        low=low,
         high=high, shape=(12,),
         dtype=np.float32
     )
@@ -84,19 +89,19 @@ class Env(AbsEnv):
     def step(self, a):
         a = np.clip(a, -self.MAX_GAIN_CHANGE, self.MAX_GAIN_CHANGE)
 
-        deltaP = self.target - self.state[:2]
+        deltaP = angle_normalize(self.target - self.state[:2])
         deltaV = -self.state[2:]
 
         dp1, dp2, dd1, dd2 = a[0], a[1], a[2], a[3]
 
-        self.p[0] = np.clip(self.p[0] + dp1 * self.dt, 0, 1)
-        self.p[1] = np.clip(self.p[1] + dp2 * self.dt, 0, 1)
-        self.d[0] = np.clip(self.d[0] + dd1 * self.dt, 0, 1)
-        self.d[1] = np.clip(self.d[1] + dd2 * self.dt, 0, 1)
+        self.p[0] = np.clip(self.p[0] + dp1 * self.dt, 0, self.MAX_GAIN_P)
+        self.p[1] = np.clip(self.p[1] + dp2 * self.dt, 0, self.MAX_GAIN_P)
+        self.d[0] = np.clip(self.d[0] + dd1 * self.dt, 0, self.MAX_GAIN_D)
+        self.d[1] = np.clip(self.d[1] + dd2 * self.dt, 0, self.MAX_GAIN_D)
 
         tau1 = self.p[0] * deltaP[0] + self.d[0] * deltaV[0]
         tau2 = self.p[1] * deltaP[1] + self.d[1] * deltaV[1]
-        torque = np.array([tau1, tau2]).squeeze()
+        torque = np.array([tau1, tau2])
         torque = np.clip(torque, -self.MAX_TORQUE, self.MAX_TORQUE)
         s_augmented = np.hstack((self.state, torque))
 
@@ -106,8 +111,6 @@ class Env(AbsEnv):
         ns = ns[:4]  # omit action
 
         # new angle
-        # ns[0] = angle_normalize(ns[0])
-        # ns[1] = angle_normalize(ns[1])
         ns[2] = np.clip(ns[2], -self.MAX_VEL_1, self.MAX_VEL_1)
         ns[3] = np.clip(ns[3], -self.MAX_VEL_2, self.MAX_VEL_2)
         self.state = ns
@@ -122,7 +125,8 @@ class Env(AbsEnv):
         return np.hstack([np.cos(self.state[0]), np.sin(self.state[0]),
                           np.cos(self.state[1]), np.sin(self.state[1]),
                           self.state[2], self.state[3],
-                          self.target[0]-self.state[0], self.target[1]-self.state[1],
+                          angle_normalize(self.target[0]-self.state[0]), angle_normalize(self.target[1]-self.state[1]),
+                          #self.target[0], self.target[1],
                           self.p[0], self.p[1], self.d[0], self.d[1]]), deltaP, deltaV
 
     def _r_func(self, distance):
@@ -151,8 +155,8 @@ class Env(AbsEnv):
     def reset(self):
         self.get_point = False
         self.grab_counter = 0
-        self.p = np.random.rand(2)
-        self.d = np.random.rand(2)
+        self.p = np.random.rand(2) * self.MAX_GAIN_P
+        self.d = np.random.rand(2) * self.MAX_GAIN_D
         self._reset_target()
         self._reset_state()
         return self._get_obs()[0]
@@ -239,15 +243,22 @@ class Env(AbsEnv):
 class ReacherControlledEnv(nn.Module, Env):
     def __init__(self):
         super().__init__()
+        self.name = 'controlled_reacher'
         self.t0 = nn.Parameter(torch.tensor([0.0]))
-        self.init_s = nn.Parameter(torch.tensor([.0, .0, .0, .0]))
-        self.init_u = nn.Parameter(torch.tensor([.0, .0]))
+
         self.u_low_torch = torch.from_numpy(-self.u_high).float()
         self.u_high_torch = torch.from_numpy(self.u_high).float()
 
-    def get_initial_state_action(self):
-        state = (self.init_s, self.init_u)
-        return self.t0, state
+    def get_initial_obs_action(self):
+        state = torch.from_numpy(self.state).float().unsqueeze(0)
+        target = torch.from_numpy(self.target).float().unsqueeze(0)
+        p = torch.from_numpy(self.p).float().unsqueeze(0)
+        d = torch.from_numpy(self.d).float().unsqueeze(0)
+        s = self._get_obs_from_state(state, target, p, d)
+
+        self.init_s = nn.Parameter(s).squeeze(0)
+        self.init_u = nn.Parameter(torch.tensor([.0, .0, .0, .0]))
+        return self.t0, (self.init_s, self.init_u)
 
     def forward(self, t, s):
         m1 = self.LINK_MASS_1
@@ -283,8 +294,8 @@ class ReacherControlledEnv(nn.Module, Env):
         angle = torch.cat((torch.atan2(pos[:, 1:2], pos[:, 0:1]), torch.atan2(pos[:, 3:4], pos[:, 2:3])), dim=1)
 
         deltaP = x[:, 6:8]
-        #deltaP = target - angle
         target = deltaP + angle
+        #deltaP = angle_normalize(target - angle)
         deltaV = -vel
         p = x[:, 8:10]
         d = x[:, 10:12]
@@ -292,10 +303,10 @@ class ReacherControlledEnv(nn.Module, Env):
         dp1, dp2, dd1, dd2 = u[:, 0:1], u[:, 1:2], u[:, 2:3], u[:, 3:4]
 
         p_, d_ = p.clone(), d.clone()
-        p_[:, 0:1] = torch.clamp(p[:, 0:1] + dp1 * self.dt, 0, 1)
-        p_[:, 1:2] = torch.clamp(p[:, 1:2] + dp2 * self.dt, 0, 1)
-        d_[:, 0:1] = torch.clamp(d[:, 0:1] + dd1 * self.dt, 0, 1)
-        d_[:, 1:2] = torch.clamp(d[:, 1:2] + dd2 * self.dt, 0, 1)
+        p_[:, 0:1] = torch.clamp(p[:, 0:1] + dp1 * self.dt, 0, self.MAX_GAIN_P)
+        p_[:, 1:2] = torch.clamp(p[:, 1:2] + dp2 * self.dt, 0, self.MAX_GAIN_P)
+        d_[:, 0:1] = torch.clamp(d[:, 0:1] + dd1 * self.dt, 0, self.MAX_GAIN_D)
+        d_[:, 1:2] = torch.clamp(d[:, 1:2] + dd2 * self.dt, 0, self.MAX_GAIN_D)
 
         tau1 = p[:, 0:1] * deltaP[:, 0:1] + d[:, 0:1] * deltaV[:, 0:1]
         tau2 = p[:, 1:2] * deltaP[:, 1:2] + d[:, 1:2] * deltaV[:, 1:2]
@@ -305,56 +316,29 @@ class ReacherControlledEnv(nn.Module, Env):
         s_aug = (torch.cat((angle, vel), dim=1), torque)
 
         solution = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')
-        state, action = solution
-        state = state[-1] # last time step
+        state_, action = solution
+        state_ = state_[-1] # last time step
 
-        ang_, vel_ = state[:, :2], state[:, 2:]
+        return self._get_obs_from_state(state_, target, p_, d_)
 
-        vel_ = torch.cat([vel_[:, :1].clamp(max=self.MAX_VEL_1, min=-self.MAX_VEL_1),
-                         vel_[:, 1:].clamp(max=self.MAX_VEL_2, min=-self.MAX_VEL_2)], dim=1)
-        pos_ = torch.cat((torch.cos(ang_[:, 0:1]), torch.sin(ang_[:, 0:1]),
-                          torch.cos(ang_[:, 1:2]), torch.sin(ang_[:, 1:2])), dim=1)
-        deltaP_ = target-ang_
-        state = torch.cat((pos_[:, 0:1], pos_[:, 1:2], pos_[:, 2:3], pos_[:, 3:4],
-                           vel_[:, 0:1], vel_[:, 1:2],
-                           deltaP_[:, 0:1], deltaP_[:, 1:2],
-                           p_[:, 0:1], p_[:, 1:2], d_[:, 0:1], d_[:, 1:2]), dim=1)
+    def _get_obs_from_state(self, state, target, p, d):
+        ang, vel = state[:, :2], state[:, 2:]
 
-        return state
+        vel = torch.cat([vel[:, :1].clamp(max=self.MAX_VEL_1, min=-self.MAX_VEL_1),
+                          vel[:, 1:].clamp(max=self.MAX_VEL_2, min=-self.MAX_VEL_2)], dim=1)
+        deltaP = angle_normalize(target - ang)
 
+        return torch.cat((torch.cos(ang[:, 0:1]), torch.sin(ang[:, 0:1]),
+                          torch.cos(ang[:, 1:2]), torch.sin(ang[:, 1:2]),
+                           vel[:, 0:1], vel[:, 1:2],
+                           deltaP[:, 0:1], deltaP[:, 1:2],
+                          # target[:, 0:1], target[:, 1:2],
+                           p[:, 0:1], p[:, 1:2], d[:, 0:1], d[:, 1:2]), dim=1)
 
-def wrap(x, m, M):
-    """Wraps ``x`` so m <= x <= M; but unlike ``bound()`` which
-    truncates, ``wrap()`` wraps x around the coordinate system defined by m,M.\n
-    For example, m = -180, M = 180 (degrees), x = 360 --> returns 0.
-    Args:
-        x: a scalar
-        m: minimum possible value in range
-        M: maximum possible value in range
-    Returns:
-        x: a scalar, wrapped
-    """
-    diff = M - m
-    while x > M:
-        x = x - diff
-    while x < m:
-        x = x + diff
-    return x
-
-
-def bound(x, m, M=None):
-    """Either have m as scalar, so bound(x,m,M) which returns m <= x <= M *OR*
-    have m as length 2 vector, bound(x,m, <IGNORED>) returns m[0] <= x <= m[1].
-    Args:
-        x: scalar
-    Returns:
-        x: scalar, bound between min (m) and Max (M)
-    """
-    if M is None:
-        M = m[1]
-        m = m[0]
-    # bound x between min (m) and Max (M)
-    return min(max(x, m), M)
+    def get_state_from_obs(self, obs):
+        pos, vel = obs[:, :4], obs[:, 4:6]
+        angle = torch.cat((torch.atan2(pos[:, 1:2], pos[:, 0:1]), torch.atan2(pos[:, 3:4], pos[:, 2:3])), dim=1)
+        return torch.cat((angle, vel), dim=1)
 
 
 def rk4(derivs, y0, t, *args, **kwargs):
@@ -387,13 +371,35 @@ def angle_normalize(x):
 
 
 if __name__ == '__main__':
+    import imageio
     env = ReacherControlledEnv()
     env.seed()
 
-    for _ in range(32):
-        env.reset()
-        for _ in range(100):
-            env.render()
-            a = env.action_space.sample()
-            env.step(a)
+    frames=[]
+
+    env.reset()
+    env.state = np.array([0, 0, 0, 0])
+    # env.MAX_GAIN_P = .5
+    # env.MAX_GAIN_D = 3
+    env.p = np.ones(2) * env.MAX_GAIN_P / 2
+    env.d = np.ones(2) * env.MAX_GAIN_D / 2
+    env.target = np.array([pi, 0])
+
+    t0, obs_action = env.get_initial_obs_action()
+    obs = obs_action[0].unsqueeze(0)
+    for _ in range(200):
+        a = env.action_space.sample()
+        obs = env.step_batch(x=obs, u=torch.from_numpy(a).float().unsqueeze(0))
+        state = env.get_state_from_obs(obs)     # for rendering
+        env.state = state.squeeze(0).detach().numpy()
+
+        f = env.render(mode='rgb_array')
+        frames.append(f)
+
+    # for _ in range(100):
+    #     f = env.render(mode='rgb_array')
+    #     frames.append(f)
+    #     a = env.action_space.sample()*0
+    #     env.step(a)
     env.close()
+    imageio.mimsave(f'../img/video_p={env.MAX_GAIN_P}_d={env.MAX_GAIN_D}.gif', frames)

@@ -89,7 +89,7 @@ def visualize_source_planning_distributions_1D(empowerment, bayes_filter, replay
     plt.savefig('img/dist_source.png')
 
 
-def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_memory, ep=-1):
+def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_memory, env, ep=-1):
     replay_memory.reset_batchptr_train()
     x, e = [], []
     for b in range(replay_memory.n_batches_train):
@@ -125,7 +125,7 @@ def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_
         plt.tight_layout()
         plt.savefig(f'img/empowerment_landscape.png')
         plt.close()
-    elif args.env == 'arm':
+    elif env == 'arm':
         state_names = ['$\\theta_1$', '$\\theta_2$']
 
         fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(8, 4))
@@ -139,23 +139,19 @@ def visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_
         plt.tight_layout()
         plt.savefig(f'img/empowerment_landscape.png')
         plt.close()
-    elif args.env == 'reacher' or args.env == 'controlled_reacher':
+    elif env.name == 'reacher' or env.name == 'controlled_reacher':
         x[:, 0:1] = np.arctan2(x[:, 1:2], x[:, 0:1])
         x[:, 1:2] = np.arctan2(x[:, 3:4], x[:, 2:3])
         x[:, 2:10] = x[:, 4:12]
 
-        state_names = ['$\\theta_1$', '$\\theta_2$', '$\\dot{\\theta}_1$', '$\\dot{\\theta}_2$',
-                       '$\Delta \\theta_1$', '$\Delta \\theta_2$',
-                       '$P_1$', '$P_2$', '$D_1$', '$D_2$']
-        num_states = 5 if 'controlled' in args.env else 2
-        for i in range(num_states):
+        for i in range(len(env.state_names) // 2):
             fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(8, 4))
             c = ax.hexbin(x[:, i * 2], x[:, i * 2 + 1], gridsize=20, C=e[:], mincnt=1, vmin=e.mean() - .1)
             fig.colorbar(c, ax=ax)
 
             ax.set_title(f'Empowerment Landscape, ep = {ep}')
-            ax.set_xlabel(state_names[i * 2])
-            ax.set_ylabel(state_names[i * 2 + 1])
+            ax.set_xlabel(env.state_names[i * 2])
+            ax.set_ylabel(env.state_names[i * 2 + 1])
             plt.tight_layout()
             plt.savefig(f'img/empowerment_landscape_x[{i}]_vs_x[{i+1}].png')
         plt.close()
