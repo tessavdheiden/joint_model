@@ -22,7 +22,7 @@ class Env(AbsEnv):
 
     MAX_GAIN_P = 1.
     MAX_GAIN_D = 6.
-    MAX_GAIN_CHANGE = 1.
+    MAX_GAIN_CHANGE = 10.
 
     MAX_TORQUE = 1.
 
@@ -163,24 +163,42 @@ class Env(AbsEnv):
 
     def benchmark_data(self, data={}):
         if len(data) == 0:
-            data = {'arm2_distance': [],
-                    'velocity_arm2_distance': [],
-                    'acceleration_arm2_distance': [],
-                    'jerk_arm2_distance': []}
+            names = ['$\\theta_1$', '$\\theta_2$', '$\\dot{\\theta}_1$', '$\\dot{\\theta}_2$',
+                     '$\\ddot{\\theta}_1$', '$\\ddot{\\theta}_2$', '$\\dddot{\\theta}_1$', '$\\dddot{\\theta}_2$']
 
-        arm2_distance = self._get_obs()[1]
-        data['arm2_distance'].append(arm2_distance)
+            data = {name: [] for name in names}
 
-        if len(data['arm2_distance']) >= 2:
-            data['velocity_arm2_distance'].append(data['arm2_distance'][-1] - data['arm2_distance'][-2])
-
-        if len(data['velocity_arm2_distance']) >= 3:
-            data['acceleration_arm2_distance'].append(data['velocity_arm2_distance'][-1] - data['velocity_arm2_distance'][-2])
-
-        if len(data['acceleration_arm2_distance']) >= 4:
-            data['jerk_arm2_distance'].append(data['acceleration_arm2_distance'][-1] - data['acceleration_arm2_distance'][-2])
+        names = list(data.keys())
+        for i, name in enumerate(names[:4]):
+            data[name].append(self.state[i])
 
         return data
+
+    def benchmark(self, data):
+        names = list(data.keys())
+        # convert to numpy
+        for i, name in enumerate(names[:4]):
+            data[name] = np.array(data[name])
+
+        data['$\\ddot{\\theta}_1$'] = np.diff(data['$\\dot{\\theta}_1$']) / self.dt
+        data['$\\ddot{\\theta}_2$'] = np.diff(data['$\\dot{\\theta}_2$']) / self.dt
+        data['$\\dddot{\\theta}_1$'] = np.diff(data['$\\ddot{\\theta}_1$']) / self.dt
+        data['$\\dddot{\\theta}_2$'] = np.diff(data['$\\ddot{\\theta}_2$']) / self.dt
+        return data
+
+    def benchmark_plot(self, data, path):
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(nrows=1, ncols=len(data), figsize=(3 * len(data), 3))
+        for i, (k, v) in enumerate(data.items()):
+            #mg = np.sqrt(np.sum(np.square(v), axis=1)) / env.dt ** i
+            ax[i].set_title(k)
+            ax[i].plot(np.arange(len(v)), v)
+            ax[i].set_xlabel("time")
+            ax[i].set_ylabel(k)
+
+        fig.tight_layout()
+        plt.savefig(path)
+
 
     def render(self, mode='human'):
         from gym.envs.classic_control import rendering
@@ -232,7 +250,6 @@ class Env(AbsEnv):
             circ = self.viewer.draw_circle(.1)
             circ._color.vec4 = (.8, .8, 0, .2)
             circ.add_attr(jtransform)
-
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
@@ -318,14 +335,12 @@ class ReacherControlledEnv(nn.Module, Env):
         solution = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')
         state_, action = solution
         state_ = state_[-1] # last time step
-
+        state_[:, 2:4] = torch.cat([state_[:, 2:3].clamp(max=self.MAX_VEL_1, min=-self.MAX_VEL_1),
+                         state_[:, 3:4].clamp(max=self.MAX_VEL_2, min=-self.MAX_VEL_2)], dim=1)
         return self._get_obs_from_state(state_, target, p_, d_)
 
     def _get_obs_from_state(self, state, target, p, d):
         ang, vel = state[:, :2], state[:, 2:]
-
-        vel = torch.cat([vel[:, :1].clamp(max=self.MAX_VEL_1, min=-self.MAX_VEL_1),
-                          vel[:, 1:].clamp(max=self.MAX_VEL_2, min=-self.MAX_VEL_2)], dim=1)
         deltaP = angle_normalize(target - ang)
 
         return torch.cat((torch.cos(ang[:, 0:1]), torch.sin(ang[:, 0:1]),
@@ -370,36 +385,64 @@ def angle_normalize(x):
     return (((x + pi) % (2 * pi)) - pi)
 
 
-if __name__ == '__main__':
+def make_video():
     import imageio
     env = ReacherControlledEnv()
-    env.seed()
-
-    frames=[]
+    frames = []
 
     env.reset()
+    env.state = np.array([-np.pi / 2, -np.pi / 2, 0, 0])
+    env.target = np.array([np.pi / 2, np.pi / 2])
+
+    for _ in range(200):
+        f = env.render(mode='rgb_array')
+        frames.append(f)
+        a = env.action_space.sample() * 0
+        env.step(a)
+
+    env.close()
+    imageio.mimsave(f'../img/video_p={env.p}_d={env.d}_ΔPD={env.MAX_GAIN_CHANGE}.gif', frames, fps=30)
+
+
+def make_plot():
+    env = ReacherControlledEnv()
+    env.reset()
+    env.state = np.array([-np.pi / 2, -np.pi / 2, 0, 0])
+    env.target = np.array([np.pi / 2, np.pi / 2])
+    data = env.benchmark_data()
+    for _ in range(200):
+        env.render(mode='rgb_array')
+        a = env.action_space.sample() * 0
+        env.step(a)
+
+        data = env.benchmark_data(data)
+    env.benchmark(data)
+    env.benchmark_plot(data, "../img/derivatives.png")
+    env.close()
+
+
+def use_torchdiffeq():
+    env = ReacherControlledEnv()
+    env.reset()
     env.state = np.array([0, 0, 0, 0])
-    # env.MAX_GAIN_P = .5
-    # env.MAX_GAIN_D = 3
-    env.p = np.ones(2) * env.MAX_GAIN_P / 2
-    env.d = np.ones(2) * env.MAX_GAIN_D / 2
     env.target = np.array([pi, 0])
 
     t0, obs_action = env.get_initial_obs_action()
     obs = obs_action[0].unsqueeze(0)
-    for _ in range(200):
+    for i in range(200):
         a = env.action_space.sample()
         obs = env.step_batch(x=obs, u=torch.from_numpy(a).float().unsqueeze(0))
-        state = env.get_state_from_obs(obs)     # for rendering
+        state = env.get_state_from_obs(obs)  # for rendering
         env.state = state.squeeze(0).detach().numpy()
 
-        f = env.render(mode='rgb_array')
-        frames.append(f)
+        env.render(mode='rgb_array')
 
-    # for _ in range(100):
-    #     f = env.render(mode='rgb_array')
-    #     frames.append(f)
-    #     a = env.action_space.sample()*0
-    #     env.step(a)
     env.close()
-    imageio.mimsave(f'../img/video_p={env.MAX_GAIN_P}_d={env.MAX_GAIN_D}.gif', frames)
+
+if __name__ == '__main__':
+    make_video()
+    make_plot()
+
+
+
+

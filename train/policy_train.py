@@ -21,7 +21,7 @@ import shutil
 import matplotlib.pyplot as plt
 from envs import *
 
-np.random.seed(1)
+np.random.seed(30)
 tf.random.set_seed(1)
 
 MAX_EPISODES = 200
@@ -35,7 +35,7 @@ MEMORY_CAPACITY = 5000
 BATCH_SIZE = 16
 VAR_MIN = 0.1
 RENDER = True
-LOAD = False
+LOAD = True
 MODE = ['easy', 'hard']
 n_model = 1
 
@@ -268,9 +268,11 @@ def train():
 def eval():
     import imageio
     s = env.reset()
+    env.state = np.array([-np.pi/2, -np.pi/2, 0, 0])
+    env.target = np.array([np.pi/2, np.pi/2])
     data = env.benchmark_data()
     frames = []
-    for t in range(100):
+    for t in range(MAX_EP_STEPS):
         if RENDER:
             f = env.render(mode='rgb_array')
             frames.append(f)
@@ -278,19 +280,12 @@ def eval():
         s_, r, done, _ = env.step(a)
         data = env.benchmark_data(data)
         s = s_
+
+    env.benchmark(data)
+    env.benchmark_plot(data, "img/derivatives.png")
     env.close()
-    fig, ax = plt.subplots(nrows=1, ncols=len(data), figsize=(3*len(data), 3))
-    for i, (k, v) in enumerate(data.items()):
-        mg = np.sqrt(np.sum(np.square(v), axis=1)) / env.dt ** i
-        ax[i].set_title(k)
-        ax[i].plot(np.arange(len(mg)), mg)
-        ax[i].set_xlabel("time")
 
-    imageio.mimsave('img/video.gif', frames)
-    fig.tight_layout()
-    plt.savefig("img/derivatives.png")
-
-
+    imageio.mimsave('img/video.gif', frames, fps=30)
 
 
 if __name__ == '__main__':
