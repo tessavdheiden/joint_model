@@ -22,7 +22,7 @@ class Env(AbsEnv):
 
     MAX_GAIN_P = 1.
     MAX_GAIN_D = 6.
-    MAX_GAIN_CHANGE = 10.
+    MAX_GAIN_CHANGE = 50.
 
     MAX_TORQUE = 1.
 
@@ -310,34 +310,25 @@ class ReacherControlledEnv(nn.Module, Env):
         pos, vel = x[:, :4], x[:, 4:6]
         angle = torch.cat((torch.atan2(pos[:, 1:2], pos[:, 0:1]), torch.atan2(pos[:, 3:4], pos[:, 2:3])), dim=1)
 
-        deltaP = x[:, 6:8]
-        target = deltaP + angle
+        delta_p = x[:, 6:8]
+        target = delta_p + angle
         #deltaP = angle_normalize(target - angle)
-        deltaV = -vel
+        delta_v = -vel
         p = x[:, 8:10]
         d = x[:, 10:12]
 
-        dp1, dp2, dd1, dd2 = u[:, 0:1], u[:, 1:2], u[:, 2:3], u[:, 3:4]
+        p = p + u[:, :2] * self.dt
+        d = d + u[:, 2:] * self.dt
 
-        p_, d_ = p.clone(), d.clone()
-        p_[:, 0:1] = torch.clamp(p[:, 0:1] + dp1 * self.dt, 0, self.MAX_GAIN_P)
-        p_[:, 1:2] = torch.clamp(p[:, 1:2] + dp2 * self.dt, 0, self.MAX_GAIN_P)
-        d_[:, 0:1] = torch.clamp(d[:, 0:1] + dd1 * self.dt, 0, self.MAX_GAIN_D)
-        d_[:, 1:2] = torch.clamp(d[:, 1:2] + dd2 * self.dt, 0, self.MAX_GAIN_D)
-
-        tau1 = p[:, 0:1] * deltaP[:, 0:1] + d[:, 0:1] * deltaV[:, 0:1]
-        tau2 = p[:, 1:2] * deltaP[:, 1:2] + d[:, 1:2] * deltaV[:, 1:2]
-        torque = torch.cat((tau1, tau2), dim=1)
-        torque = torch.clamp(torque, -self.MAX_TORQUE, self.MAX_TORQUE)
-
+        torque = torch.clamp(p * delta_p + d * delta_v, -self.MAX_TORQUE, self.MAX_TORQUE)
         s_aug = (torch.cat((angle, vel), dim=1), torque)
-
         solution = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')
+
         state_, action = solution
         state_ = state_[-1] # last time step
-        state_[:, 2:4] = torch.cat([state_[:, 2:3].clamp(max=self.MAX_VEL_1, min=-self.MAX_VEL_1),
-                         state_[:, 3:4].clamp(max=self.MAX_VEL_2, min=-self.MAX_VEL_2)], dim=1)
-        return self._get_obs_from_state(state_, target, p_, d_)
+        state_[:, 2:3] = torch.clamp(state_[:, 2:3].clone(), -self.MAX_VEL_1, self.MAX_VEL_1)
+        state_[:, 3:4] = torch.clamp(state_[:, 3:4].clone(), -self.MAX_VEL_2, self.MAX_VEL_2)
+        return self._get_obs_from_state(state_, target, p, d)
 
     def _get_obs_from_state(self, state, target, p, d):
         ang, vel = state[:, :2], state[:, 2:]
@@ -385,16 +376,40 @@ def angle_normalize(x):
     return (((x + pi) % (2 * pi)) - pi)
 
 
+
+def set(env):
+    task="turn quarter circle"
+    if task=="turn both angles":
+        env.state = np.array([-pi / 2, -pi / 2, 0, 0])
+        env.target = np.array([pi / 2, pi / 2])
+    elif task=="turn half circle":
+        env.state = np.array([0, 0, 0, 0])
+        env.target = np.array([-pi, 0])
+    elif task=="turn quarter circle":
+        env.state = np.array([0, pi/2, 0, 0])
+        env.target = np.array([-pi/2, pi/2])
+    elif task=="point to point":
+        env.state = np.array([pi*(3/4), pi/4, 0, 0])
+        env.target = np.array([pi/4, pi/8])
+    params="over damped"
+    if params=="over damped":
+        env.d=np.ones_like(env.p) * env.MAX_GAIN_D
+        env.p=np.ones_like(env.p) * env.MAX_GAIN_P / 2
+    elif params=="chaotic":
+        env.d=np.zeros_like(env.p)
+        env.p=np.ones_like(env.p) * env.MAX_GAIN_P / 2
+    elif params=="good":
+        env.d=np.ones_like(env.d) * env.MAX_GAIN_D / 3
+        env.p=np.ones_like(env.p) * env.MAX_GAIN_P / 2
+
 def make_video():
     import imageio
     env = ReacherControlledEnv()
     frames = []
 
     env.reset()
-    env.state = np.array([-np.pi / 2, -np.pi / 2, 0, 0])
-    env.target = np.array([np.pi / 2, np.pi / 2])
 
-    for _ in range(200):
+    for _ in range(100):
         f = env.render(mode='rgb_array')
         frames.append(f)
         a = env.action_space.sample() * 0
@@ -407,8 +422,26 @@ def make_video():
 def make_plot():
     env = ReacherControlledEnv()
     env.reset()
-    env.state = np.array([-np.pi / 2, -np.pi / 2, 0, 0])
-    env.target = np.array([np.pi / 2, np.pi / 2])
+    task = "point to point"
+    if task == "turn both angles":
+        env.state = np.array([-pi / 2, -pi / 2, 0, 0])
+        env.target = np.array([pi / 2, pi / 2])
+    elif task == "turn half circle":
+        env.state = np.array([0, 0, 0, 0])
+        env.target = np.array([-pi, 0])
+    elif task == "point to point":
+        env.state = np.array([pi * (3 / 4), pi / 4, 0, 0])
+        env.target = np.array([pi / 4, pi / 8])
+    params = "good"
+    if params == "over damped":
+        env.d = np.ones_like(env.p) * env.MAX_GAIN_D
+        env.p = np.ones_like(env.p) * env.MAX_GAIN_P / 2
+    elif params == "chaotic":
+        env.d = np.zeros_like(env.p)
+        env.p = np.ones_like(env.p) * env.MAX_GAIN_P / 2
+    elif params == "good":
+        env.d = np.ones_like(env.d) * env.MAX_GAIN_D / 2
+        env.p = np.ones_like(env.p) * env.MAX_GAIN_P / 2
     data = env.benchmark_data()
     for _ in range(200):
         env.render(mode='rgb_array')
@@ -441,7 +474,7 @@ def use_torchdiffeq():
 
 if __name__ == '__main__':
     make_video()
-    make_plot()
+    # make_plot()
 
 
 
