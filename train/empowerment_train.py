@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from collections import namedtuple
 import matplotlib.pyplot as plt
-
+import time
 
 from envs import *
 from empowerment.empowerment import Empowerment
@@ -23,7 +23,7 @@ def train_empowerment(env, empowerment, replay_memory, args, bayes_filter=None):
 
     for i in range(args.num_epochs):
         replay_memory.reset_batchptr_train()
-
+        t0 = time.time()
         E = np.zeros((replay_memory.n_batches_train, args.batch_size * args.seq_length))
         empowerment.prepare_update()
         for b in range(replay_memory.n_batches_train):
@@ -46,7 +46,7 @@ def train_empowerment(env, empowerment, replay_memory, args, bayes_filter=None):
                 empowerment.prepare_update()
 
         records[i] = Record(i, E.mean())
-        print(f'ep = {i}, empowerment = {records[i].E:.4f}')
+        print(f'ep = {i}, empowerment = {records[i].E:.4f} time = {time.time()-t0:.2f}')
 
     env.close()
     fig, ax = plt.subplots()
@@ -63,12 +63,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--val_frac', type=float, default=0.1,
                         help='fraction of data to be witheld in validation set')
-    parser.add_argument('--seq_length', type=int, default=32, help='sequence length for training')
+    parser.add_argument('--seq_length', type=int, default=100, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
-    parser.add_argument('--num_epochs', type=int, default=1001, help='number of epochs')
-    parser.add_argument('--n_trials', type=int, default=2500,
+    parser.add_argument('--num_epochs', type=int, default=2001, help='number of epochs')
+    parser.add_argument('--n_trials', type=int, default=2000,
                         help='number of data sequences to collect in each episode')
-    parser.add_argument('--trial_len', type=int, default=32, help='number of steps in each trial')
+    parser.add_argument('--trial_len', type=int, default=100, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
                         help='number of subsequences to divide each sequence into')
     parser.add_argument('--env', type=str, default='controlled_reacher',

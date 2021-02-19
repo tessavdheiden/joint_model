@@ -10,7 +10,7 @@ from envs.env_abs import AbsEnv
 
 
 class Env(AbsEnv):
-    dt = .1
+    dt = .5
 
     LINK_LENGTH_1 = 1.  # [m]
     LINK_LENGTH_2 = 1.  # [m]
@@ -20,9 +20,9 @@ class Env(AbsEnv):
     MAX_VEL_1 = 4 * pi
     MAX_VEL_2 = 9 * pi
 
-    MAX_GAIN_P = 1.
-    MAX_GAIN_D = 6.
-    MAX_GAIN_CHANGE = 50.
+    MAX_GAIN_P = 2.
+    MAX_GAIN_D = 2.
+    MAX_GAIN_CHANGE = 1.
 
     MAX_TORQUE = 1.
 
@@ -377,8 +377,8 @@ def angle_normalize(x):
 
 
 
-def set(env):
-    task="turn quarter circle"
+def set(env, task=None, params=None):
+
     if task=="turn both angles":
         env.state = np.array([-pi / 2, -pi / 2, 0, 0])
         env.target = np.array([pi / 2, pi / 2])
@@ -391,7 +391,7 @@ def set(env):
     elif task=="point to point":
         env.state = np.array([pi*(3/4), pi/4, 0, 0])
         env.target = np.array([pi/4, pi/8])
-    params="over damped"
+
     if params=="over damped":
         env.d=np.ones_like(env.p) * env.MAX_GAIN_D
         env.p=np.ones_like(env.p) * env.MAX_GAIN_P / 2
@@ -399,8 +399,9 @@ def set(env):
         env.d=np.zeros_like(env.p)
         env.p=np.ones_like(env.p) * env.MAX_GAIN_P / 2
     elif params=="good":
-        env.d=np.ones_like(env.d) * env.MAX_GAIN_D / 3
-        env.p=np.ones_like(env.p) * env.MAX_GAIN_P / 2
+        env.d=np.array([1.13751305, 0.39637199])
+        env.p=np.array([0.0632651,  1.31997793])
+
 
 def make_video():
     import imageio
@@ -408,7 +409,7 @@ def make_video():
     frames = []
 
     env.reset()
-
+    set(env, params='good', task="turn quarter circle")
     for _ in range(100):
         f = env.render(mode='rgb_array')
         frames.append(f)
@@ -422,26 +423,7 @@ def make_video():
 def make_plot():
     env = ReacherControlledEnv()
     env.reset()
-    task = "point to point"
-    if task == "turn both angles":
-        env.state = np.array([-pi / 2, -pi / 2, 0, 0])
-        env.target = np.array([pi / 2, pi / 2])
-    elif task == "turn half circle":
-        env.state = np.array([0, 0, 0, 0])
-        env.target = np.array([-pi, 0])
-    elif task == "point to point":
-        env.state = np.array([pi * (3 / 4), pi / 4, 0, 0])
-        env.target = np.array([pi / 4, pi / 8])
-    params = "good"
-    if params == "over damped":
-        env.d = np.ones_like(env.p) * env.MAX_GAIN_D
-        env.p = np.ones_like(env.p) * env.MAX_GAIN_P / 2
-    elif params == "chaotic":
-        env.d = np.zeros_like(env.p)
-        env.p = np.ones_like(env.p) * env.MAX_GAIN_P / 2
-    elif params == "good":
-        env.d = np.ones_like(env.d) * env.MAX_GAIN_D / 2
-        env.p = np.ones_like(env.p) * env.MAX_GAIN_P / 2
+
     data = env.benchmark_data()
     for _ in range(200):
         env.render(mode='rgb_array')
@@ -455,26 +437,34 @@ def make_plot():
 
 
 def use_torchdiffeq():
+    import imageio
     env = ReacherControlledEnv()
-    env.reset()
-    env.state = np.array([0, 0, 0, 0])
-    env.target = np.array([pi, 0])
+    frames = []
 
+    env.reset()
+
+    #set(env, params="over damped", task="turn half circle")
+    print(f"P = {env.p}, D = {env.d}")
+    env.d = np.array([1.13751305, 0.39637199])
+    env.p = np.array([0.0632651, 1.31997793])
     t0, obs_action = env.get_initial_obs_action()
     obs = obs_action[0].unsqueeze(0)
-    for i in range(200):
-        a = env.action_space.sample()
+    for i in range(100):
+        a = env.action_space.sample()*0
         obs = env.step_batch(x=obs, u=torch.from_numpy(a).float().unsqueeze(0))
         state = env.get_state_from_obs(obs)  # for rendering
         env.state = state.squeeze(0).detach().numpy()
 
-        env.render(mode='rgb_array')
+        f=env.render(mode='rgb_array')
+        frames.append(f)
 
     env.close()
+    imageio.mimsave(f'../img/video_p={env.p}_d={env.d}_ΔPD={env.MAX_GAIN_CHANGE}.gif', frames, fps=30)
 
 if __name__ == '__main__':
-    make_video()
+    # make_video()
     # make_plot()
+    use_torchdiffeq()
 
 
 
