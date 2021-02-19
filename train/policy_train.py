@@ -20,6 +20,8 @@ import os
 import shutil
 import matplotlib.pyplot as plt
 from envs import *
+from viz.benchmark_plot import BenchmarkPlot
+from viz.video import Video
 
 np.random.seed(30)
 tf.random.set_seed(1)
@@ -266,26 +268,28 @@ def train():
 
 
 def eval():
-    import imageio
     s = env.reset()
+    b = BenchmarkPlot()
+    v = Video()
+
     env.state = np.array([-np.pi/2, -np.pi/2, 0, 0])
     env.target = np.array([np.pi/2, np.pi/2])
-    data = env.benchmark_data()
-    frames = []
+    data = env.get_benchmark_data()
+
     for t in range(MAX_EP_STEPS):
         if RENDER:
-            f = env.render(mode='rgb_array')
-            frames.append(f)
+            v.add(env.render(mode='rgb_array'))
         a = actor.choose_action(s)
         s_, r, done, _ = env.step(a)
-        data = env.benchmark_data(data)
+        data = env.get_benchmark_data(data)
         s = s_
 
-    env.benchmark(data)
-    env.benchmark_plot(data, "img/derivatives.png")
+    env.do_benchmark(data)
+    b.add(data)
+    b.plot("img/derivatives.png")
     env.close()
 
-    imageio.mimsave('img/video.gif', frames, fps=30)
+    v.save('img/video.gif')
 
 
 if __name__ == '__main__':

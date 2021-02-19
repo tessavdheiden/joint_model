@@ -5,7 +5,7 @@ from torch.distributions import Normal
 import torch.optim as optim
 
 
-N_STEP = 2
+N_STEP = 1
 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -59,7 +59,8 @@ class Empowerment(nn.Module):
         self.t = None
         self.q_steps = 4
         self.use_filter = False
-        self.step = env.step_batch
+        # self.step = env.step_batch
+        self.env = env
         self.cast = lambda x: x
 
         self.it = 0
@@ -111,10 +112,10 @@ class Empowerment(nn.Module):
         (μ_ω, σ_ω) = self.ω(z_ω)
         dist_ω = Normal(μ_ω, σ_ω)
         a_ω = dist_ω.rsample()
-        z_ = self.step(z, a_ω.detach())                 # ω-step
+        z_ = self.env.step_batch(z, a_ω.detach())                 # ω-step
 
         for t in range(1, N_STEP):
-            z_ = self.step(z_, torch.zeros_like(a_ω))   # n state propagations with no PD update
+            z_ = self.env.step_batch(z_, torch.zeros_like(a_ω))   # n state propagations with no PD update
 
         z_q = self.flt_q(torch.cat((z, z_), dim=1))     # q does not observe PD_t+n
         (μ_q, σ_q) = self.q(z_q)

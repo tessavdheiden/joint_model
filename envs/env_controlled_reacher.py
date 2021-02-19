@@ -38,8 +38,7 @@ class Env(AbsEnv):
     # cos/sin of 2 angles, 2 angular vel, 2 angle errors, 2 vel errors, 2 p's, 2 d's
     high = np.array([1, 1, 1, 1, MAX_VEL_1, MAX_VEL_2, pi, pi, MAX_GAIN_P, MAX_GAIN_P, MAX_GAIN_D, MAX_GAIN_D], dtype=np.float32)
     low = np.array([-1, -1, -1, -1, -MAX_VEL_1, -MAX_VEL_2, -pi, -pi, 0, 0, 0, 0], dtype=np.float32)
-    state_names = ['$\\theta_1$', '$\\theta_2$', '$\\dot{\\theta}_1$', '$\\dot{\\theta}_2$', '$\Delta\\theta_1$',
-                   '$\Delta\\theta_2$', '$P_1$', '$P_2$', '$D_1$', '$D_2$']
+    state_names = ['θ1', 'Θ2', 'dθ1', 'dΘ2', 'Δθ1', 'ΔΘ2', 'p1', 'p2', 'd1', 'd2']
     observation_space = spaces.Box(
         low=low,
         high=high, shape=(12,),
@@ -161,11 +160,9 @@ class Env(AbsEnv):
         self._reset_state()
         return self._get_obs()[0]
 
-    def benchmark_data(self, data={}):
+    def get_benchmark_data(self, data={}):
         if len(data) == 0:
-            names = ['$\\theta_1$', '$\\theta_2$', '$\\dot{\\theta}_1$', '$\\dot{\\theta}_2$',
-                     '$\\ddot{\\theta}_1$', '$\\ddot{\\theta}_2$', '$\\dddot{\\theta}_1$', '$\\dddot{\\theta}_2$']
-
+            names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'ddotθ1', 'ddotθ2', 'dddotθ1', 'dddotθ2']
             data = {name: [] for name in names}
 
         names = list(data.keys())
@@ -174,31 +171,16 @@ class Env(AbsEnv):
 
         return data
 
-    def benchmark(self, data):
+    def do_benchmark(self, data):
         names = list(data.keys())
         # convert to numpy
-        for i, name in enumerate(names[:4]):
-            data[name] = np.array(data[name])
+        for i, name in enumerate(names):
+            if i < 4:
+                data[name] = np.array(data[name])
+            else:
+                data[name] = np.diff(data[names[i-2]]) / self.dt
 
-        data['$\\ddot{\\theta}_1$'] = np.diff(data['$\\dot{\\theta}_1$']) / self.dt
-        data['$\\ddot{\\theta}_2$'] = np.diff(data['$\\dot{\\theta}_2$']) / self.dt
-        data['$\\dddot{\\theta}_1$'] = np.diff(data['$\\ddot{\\theta}_1$']) / self.dt
-        data['$\\dddot{\\theta}_2$'] = np.diff(data['$\\ddot{\\theta}_2$']) / self.dt
         return data
-
-    def benchmark_plot(self, data, path):
-        import matplotlib.pyplot as plt
-        fig, ax = plt.subplots(nrows=1, ncols=len(data), figsize=(3 * len(data), 3))
-        for i, (k, v) in enumerate(data.items()):
-            #mg = np.sqrt(np.sum(np.square(v), axis=1)) / env.dt ** i
-            ax[i].set_title(k)
-            ax[i].plot(np.arange(len(v)), v)
-            ax[i].set_xlabel("time")
-            ax[i].set_ylabel(k)
-
-        fig.tight_layout()
-        plt.savefig(path)
-
 
     def render(self, mode='human'):
         from gym.envs.classic_control import rendering
@@ -252,9 +234,6 @@ class Env(AbsEnv):
             circ.add_attr(jtransform)
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
-
-    def step_batch(self, x, u):
-        pass
 
 
 class ReacherControlledEnv(nn.Module, Env):
@@ -404,49 +383,47 @@ def set(env, task=None, params=None):
 
 
 def make_video():
-    import imageio
+    from viz.video import Video
     env = ReacherControlledEnv()
-    frames = []
+    v = Video()
 
     env.reset()
     set(env, params='good', task="turn quarter circle")
     for _ in range(100):
-        f = env.render(mode='rgb_array')
-        frames.append(f)
+        v.add(env.render(mode='rgb_array'))
         a = env.action_space.sample() * 0
         env.step(a)
 
+    v.save('../img/video.gif')
     env.close()
-    imageio.mimsave(f'../img/video_p={env.p}_d={env.d}_ΔPD={env.MAX_GAIN_CHANGE}.gif', frames, fps=30)
 
 
 def make_plot():
+    from viz.benchmark_plot import BenchmarkPlot
     env = ReacherControlledEnv()
     env.reset()
+    set(env, params='good', task="turn quarter circle")
 
-    data = env.benchmark_data()
+    b = BenchmarkPlot()
+    data = env.get_benchmark_data()
     for _ in range(200):
         env.render(mode='rgb_array')
         a = env.action_space.sample() * 0
         env.step(a)
 
-        data = env.benchmark_data(data)
-    env.benchmark(data)
-    env.benchmark_plot(data, "../img/derivatives.png")
+        data = env.get_benchmark_data(data)
+    env.do_benchmark(data)
+    b.add(data)
+    b.plot("../img/derivatives.png")
     env.close()
 
 
 def use_torchdiffeq():
-    import imageio
+    from viz.video import Video
     env = ReacherControlledEnv()
-    frames = []
-
+    v = Video()
     env.reset()
 
-    #set(env, params="over damped", task="turn half circle")
-    print(f"P = {env.p}, D = {env.d}")
-    env.d = np.array([1.13751305, 0.39637199])
-    env.p = np.array([0.0632651, 1.31997793])
     t0, obs_action = env.get_initial_obs_action()
     obs = obs_action[0].unsqueeze(0)
     for i in range(100):
@@ -454,16 +431,15 @@ def use_torchdiffeq():
         obs = env.step_batch(x=obs, u=torch.from_numpy(a).float().unsqueeze(0))
         state = env.get_state_from_obs(obs)  # for rendering
         env.state = state.squeeze(0).detach().numpy()
-
-        f=env.render(mode='rgb_array')
-        frames.append(f)
+        v.add(env.render(mode='rgb_array'))
 
     env.close()
-    imageio.mimsave(f'../img/video_p={env.p}_d={env.d}_ΔPD={env.MAX_GAIN_CHANGE}.gif', frames, fps=30)
+    v.save('../img/video.png')
+
 
 if __name__ == '__main__':
-    # make_video()
-    # make_plot()
+    make_video()
+    make_plot()
     use_torchdiffeq()
 
 
