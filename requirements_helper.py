@@ -17,3 +17,5 @@ import argparse
 print(f"argparse=={argparse.__version__}")
 import imageio
 print(f"argparse=={imageio.__version__}")
+import pandas
+print(f"argparse=={pandas.__version__}")

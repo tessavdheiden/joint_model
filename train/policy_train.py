@@ -20,13 +20,12 @@ import os
 import shutil
 import matplotlib.pyplot as plt
 from envs import *
-from viz.benchmark_plot import BenchmarkPlot
-from viz.video import Video
+from viz import *
 
 np.random.seed(30)
 tf.random.set_seed(1)
 
-MAX_EPISODES = 200
+MAX_EPISODES = 100
 MAX_EP_STEPS = 200
 LR_A = 1e-4  # learning rate for actor
 LR_C = 1e-4  # learning rate for critic
@@ -268,12 +267,12 @@ def train():
 
 
 def eval():
+    from envs.env_controlled_reacher import set
     s = env.reset()
+    set(env, task="turn quarter circle")
     b = BenchmarkPlot()
     v = Video()
 
-    env.state = np.array([-np.pi/2, -np.pi/2, 0, 0])
-    env.target = np.array([np.pi/2, np.pi/2])
     data = env.get_benchmark_data()
 
     for t in range(MAX_EP_STEPS):

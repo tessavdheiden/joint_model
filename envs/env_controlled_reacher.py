@@ -38,7 +38,7 @@ class Env(AbsEnv):
     # cos/sin of 2 angles, 2 angular vel, 2 angle errors, 2 vel errors, 2 p's, 2 d's
     high = np.array([1, 1, 1, 1, MAX_VEL_1, MAX_VEL_2, pi, pi, MAX_GAIN_P, MAX_GAIN_P, MAX_GAIN_D, MAX_GAIN_D], dtype=np.float32)
     low = np.array([-1, -1, -1, -1, -MAX_VEL_1, -MAX_VEL_2, -pi, -pi, 0, 0, 0, 0], dtype=np.float32)
-    state_names = ['θ1', 'Θ2', 'dθ1', 'dΘ2', 'Δθ1', 'ΔΘ2', 'p1', 'p2', 'd1', 'd2']
+    state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'Δθ1', 'Δθ2', 'p1', 'p2', 'd1', 'd2']
     observation_space = spaces.Box(
         low=low,
         high=high, shape=(12,),
@@ -90,6 +90,7 @@ class Env(AbsEnv):
 
         deltaP = angle_normalize(self.target - self.state[:2])
         deltaV = -self.state[2:]
+        costs = deltaP ** 2 + .1 * self.state[2:] ** 2 + .001 * (a.reshape(2, 2) ** 2)
 
         dp1, dp2, dd1, dd2 = a[0], a[1], a[2], a[3]
 
@@ -115,8 +116,9 @@ class Env(AbsEnv):
         self.state = ns
 
         obs, deltaP, deltaV = self._get_obs()
-        r = self._r_func(deltaP) - np.sqrt(np.sum(np.square(deltaV)))
-        return obs, r, self.get_point, {}
+
+        #r = self._r_func(deltaP) - np.sqrt(np.sum(np.square(deltaV)))
+        return obs, -costs.sum(), self.get_point, {}
 
     def _get_obs(self):
         deltaP = self.target - self.state[:2]
@@ -323,7 +325,7 @@ class ReacherControlledEnv(nn.Module, Env):
     def get_state_from_obs(self, obs):
         pos, vel = obs[:, :4], obs[:, 4:6]
         angle = torch.cat((torch.atan2(pos[:, 1:2], pos[:, 0:1]), torch.atan2(pos[:, 3:4], pos[:, 2:3])), dim=1)
-        return torch.cat((angle, vel), dim=1)
+        return torch.cat((angle, obs[:, 4:]), dim=1)
 
 
 def rk4(derivs, y0, t, *args, **kwargs):
@@ -429,12 +431,12 @@ def use_torchdiffeq():
     for i in range(100):
         a = env.action_space.sample()*0
         obs = env.step_batch(x=obs, u=torch.from_numpy(a).float().unsqueeze(0))
-        state = env.get_state_from_obs(obs)  # for rendering
+        state = env.get_state_from_obs(obs)[:, :4]  # for rendering
         env.state = state.squeeze(0).detach().numpy()
         v.add(env.render(mode='rgb_array'))
 
     env.close()
-    v.save('../img/video.png')
+    v.save('../img/video.gif')
 
 
 if __name__ == '__main__':

@@ -68,6 +68,7 @@ class Empowerment(nn.Module):
     def set_transition(self, transition_network):
         self.t = transition_network
         self.z_dim = transition_network.z_dim
+        self.t.prepare_eval()
 
     def fwd_n_steps(self, z):
         z = self.cast(z)

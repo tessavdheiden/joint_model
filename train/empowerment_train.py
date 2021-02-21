@@ -2,60 +2,55 @@
 import os
 import numpy as np
 import torch
-from collections import namedtuple
-import matplotlib.pyplot as plt
 import time
+import pandas as pd
 
 from envs import *
+from viz import *
 from empowerment.empowerment import Empowerment
 from controller import Controller
 from filters.bayes_filter import BayesFilter
 from filters.bayes_filter_fully_connected import BayesFilterFullyConnected
 from filters.simple_filter import SimpleFilter
 from memory.replay_memory import ReplayMemory
-from empowerment.empowerment_viz import visualize_empowerment_landschape_1D, visualize_empowerment_landschape_2D
-
-Record = namedtuple('Transition', ['ep', 'E'])
 
 
 def train_empowerment(env, empowerment, replay_memory, args, bayes_filter=None):
-    records = [None] * args.num_epochs
+    rp = RecordPlot()
+    lp = LandscapePlot()
+    cast = lambda x: x.detach().numpy()
 
     for i in range(args.num_epochs):
         replay_memory.reset_batchptr_train()
         t0 = time.time()
         E = np.zeros((replay_memory.n_batches_train, args.batch_size * args.seq_length))
+
         empowerment.prepare_update()
         for b in range(replay_memory.n_batches_train):
             batch_dict = replay_memory.next_batch_train()
             x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
             if args.use_filter:
-                bayes_filter.prepare_eval()
-                _, _, z_pred, _ = bayes_filter.propagate_solution(x, u)
-                E[b, :] = empowerment.update(z_pred.reshape(-1, z_pred.shape[2]))
+                z = bayes_filter.propagate_solution(x, u)[2]
             else:
-                E[b, :] = empowerment.update(x.reshape(-1, x.shape[2]))
+                z = x
+            E[b, :] = empowerment.update(z.reshape(-1, z.shape[2]))
 
         if i % 10 == 0:
             with torch.no_grad():
                 empowerment.prepare_eval()
-                if replay_memory.state_dim == 1:
-                    visualize_empowerment_landschape_1D(empowerment, bayes_filter, replay_memory, ep=i)
-                else:
-                    visualize_empowerment_landschape_2D(args, empowerment, bayes_filter, replay_memory, env, ep=i)
-                empowerment.prepare_update()
+                x = replay_memory.x
+                x = torch.from_numpy(x.reshape(-1, x.shape[2]))
+                e = empowerment(x)
+                x = cast(env.get_state_from_obs(x))
+                lp.add(xy=pd.DataFrame(x, index=np.arange(len(x)), columns=env.state_names), z=cast(e).reshape(-1, 1))
+                lp.plot('img/landscape')
 
-        records[i] = Record(i, E.mean())
-        print(f'ep = {i}, empowerment = {records[i].E:.4f} time = {time.time()-t0:.2f}')
+        rp.add(i, E.mean())
+        print(f'ep = {i}, empowerment = {E.mean():.4f} time = {time.time()-t0:.2f}')
 
     env.close()
-    fig, ax = plt.subplots()
-    ax.scatter([r.ep for r in records], [r.E for r in records])
-    ax.set_xlabel('Episode')
-    ax.set_ylabel('$\\mathcal{E}$')
-    ax.grid('on')
-    fig.tight_layout()
-    plt.savefig('img/curve_empowerment.png')
+    rp.plot('img/empowerment_training_curve.png')
+
 
 
 def main():
@@ -66,7 +61,7 @@ def main():
     parser.add_argument('--seq_length', type=int, default=100, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
     parser.add_argument('--num_epochs', type=int, default=2001, help='number of epochs')
-    parser.add_argument('--n_trials', type=int, default=3000,
+    parser.add_argument('--n_trials', type=int, default=2000,
                         help='number of data sequences to collect in each episode')
     parser.add_argument('--trial_len', type=int, default=128, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
