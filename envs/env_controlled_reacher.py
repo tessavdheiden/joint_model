@@ -10,7 +10,7 @@ from envs.env_abs import AbsEnv
 
 
 class Env(AbsEnv):
-    dt = .5
+    dt = .1
 
     LINK_LENGTH_1 = 1.  # [m]
     LINK_LENGTH_2 = 1.  # [m]
@@ -36,7 +36,8 @@ class Env(AbsEnv):
     )
 
     # cos/sin of 2 angles, 2 angular vel, 2 angle errors, 2 vel errors, 2 p's, 2 d's
-    high = np.array([1, 1, 1, 1, MAX_VEL_1, MAX_VEL_2, pi, pi, MAX_GAIN_P, MAX_GAIN_P, MAX_GAIN_D, MAX_GAIN_D], dtype=np.float32)
+    high = np.array([1, 1, 1, 1, MAX_VEL_1, MAX_VEL_2, pi, pi,
+                     MAX_GAIN_P, MAX_GAIN_P, MAX_GAIN_D, MAX_GAIN_D], dtype=np.float32)
     low = np.array([-1, -1, -1, -1, -MAX_VEL_1, -MAX_VEL_2, -pi, -pi, 0, 0, 0, 0], dtype=np.float32)
     state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'Δθ1', 'Δθ2', 'p1', 'p2', 'd1', 'd2']
     observation_space = spaces.Box(

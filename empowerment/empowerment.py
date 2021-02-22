@@ -5,7 +5,7 @@ from torch.distributions import Normal
 import torch.optim as optim
 
 
-N_STEP = 100
+N_STEP = 1
 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -47,6 +47,14 @@ class Empowerment(nn.Module):
             self.auto_regressive = None
             self.opt_q = optim.Adam(self.q.parameters(), lr=1e-4)
             self.forward = self.fwd_step
+        elif env.name == 'pendulum':
+            self.flt_ω = lambda x: x
+            self.flt_q = lambda x, x_: torch.cat((x, x_), dim=1)
+            self.ω = Net(self.z_dim, self.action_dim, self.h_dim)
+            self.q = Net(self.z_dim * 2, self.action_dim, self.h_dim)
+            self.auto_regressive = None
+            self.opt_q = optim.Adam(self.q.parameters(), lr=1e-4)
+            self.forward = self.fwd_step
         else:
             self.ω = Net(self.z_dim, self.action_dim, self.h_dim)
             self.q = Net(self.z_dim*2, self.action_dim, self.h_dim)
@@ -84,7 +92,7 @@ class Empowerment(nn.Module):
             all_a_ω.append(a_ω.unsqueeze(1))
             all_log_prob_ω.append(dist_ω.log_prob(a_ω).unsqueeze(1))
 
-            z_ = self.step(z_, a_ω)
+            z_ = self.env.step_batch(z_, a_ω)
 
         all_a_ω = torch.cat(all_a_ω, dim=1)
         all_log_prob_ω = torch.cat(all_log_prob_ω, dim=1)

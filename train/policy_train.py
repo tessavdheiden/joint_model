@@ -25,7 +25,7 @@ from viz import *
 np.random.seed(30)
 tf.random.set_seed(1)
 
-MAX_EPISODES = 100
+MAX_EPISODES = 200
 MAX_EP_STEPS = 200
 LR_A = 1e-4  # learning rate for actor
 LR_C = 1e-4  # learning rate for critic
@@ -40,7 +40,7 @@ LOAD = False
 MODE = ['easy', 'hard']
 n_model = 1
 
-env = ReacherControlledEnv()
+env = ArmEnv()
 STATE_DIM = env.observation_space.shape[0]
 ACTION_DIM = env.action_dim
 ACTION_BOUND = env.u_high
@@ -215,10 +215,10 @@ else:
 
 
 def train():
-    from empowerment.empowerment import Empowerment
-    empowerment = Empowerment(env)
-    empowerment.init_from_save()
-    empowerment.prepare_eval()
+    # from empowerment.empowerment import Empowerment
+    # empowerment = Empowerment(env)
+    # empowerment.init_from_save()
+    # empowerment.prepare_eval()
 
     var = 2.  # control exploration
     rewards = []
@@ -235,8 +235,8 @@ def train():
             a = actor.choose_action(s)
             a = np.clip(np.random.normal(a, var), -ACTION_BOUND, ACTION_BOUND)  # add randomness to action selection for exploration
             s_, r, done, _ = env.step(a)
-            e = empowerment(torch.from_numpy(s).unsqueeze(0).float())
-            r = e.detach().numpy().reshape(-1)[0]
+            # e = empowerment(torch.from_numpy(s).unsqueeze(0).float())
+            # r = e.detach().numpy().reshape(-1)[0]
             M.store_transition(s, a, r, s_)
 
             if M.pointer > MEMORY_CAPACITY:

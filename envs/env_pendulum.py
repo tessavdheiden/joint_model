@@ -33,6 +33,7 @@ class PendulumEnv(AbsEnv):
         high=high,
         dtype=np.float32
     )
+    state_names = ['θ', 'dotθ']
 
     def __init__(self, g=10.0):
         self.name = 'Pendulum'
@@ -129,6 +130,10 @@ class PendulumEnv(AbsEnv):
         x = torch.stack((torch.cos(newth), torch.sin(newth), newthdot), dim=-1).squeeze(1)
         return x
 
+    def get_state_from_obs(self, obs):
+        pos, vel = obs[:, :2], obs[:, 2:]
+        angle = torch.atan2(pos[:, 1:2], pos[:, 0:1])
+        return torch.cat((angle, vel), dim=1)
 
 def angle_normalize(x):
     return (((x+np.pi) % (2*np.pi)) - np.pi)

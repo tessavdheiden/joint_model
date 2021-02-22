@@ -62,12 +62,12 @@ def main():
     parser.add_argument('--seq_length', type=int, default=100, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
     parser.add_argument('--num_epochs', type=int, default=2001, help='number of epochs')
-    parser.add_argument('--n_trials', type=int, default=500,
+    parser.add_argument('--n_trials', type=int, default=2000,
                         help='number of data sequences to collect in each episode')
     parser.add_argument('--trial_len', type=int, default=100, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
                         help='number of subsequences to divide each sequence into')
-    parser.add_argument('--env', type=str, default='controlled_reacher',
+    parser.add_argument('--env', type=str, default='arm',
                         help='pendulum, ball_in_box, tanh2d, arm, reacher, controlled_reacher')
     parser.add_argument('--filter_type', type=int, default=1,
                         help='0=bayes filter, 1=bayes filter fully connected')

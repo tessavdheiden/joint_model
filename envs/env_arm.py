@@ -6,10 +6,6 @@ import torch
 
 from envs.env_abs import AbsEnv
 
-MODE = "wrap"
-OBS = "angles"
-TARGET = "angles"
-
 
 class ArmEnv(AbsEnv):
     '''
@@ -30,18 +26,11 @@ class ArmEnv(AbsEnv):
     )
     s_min = -1
     s_max = 1
-    if OBS == "angles":
-        observation_space = spaces.Box(
-            low=-s_max,
-            high=s_max, shape=(4,),
-            dtype=np.float32
-        )
-    elif OBS == "sin/cos":
-        observation_space = spaces.Box(
-            low=-s_max,
-            high=s_max, shape=(6,),
-            dtype=np.float32
-        )
+    observation_space = spaces.Box(
+        low=-s_max,
+        high=s_max, shape=(6,),
+        dtype=np.float32
+    )
     action_dim = 2
 
     LINK_LENGTH_1 = 1
@@ -49,6 +38,8 @@ class ArmEnv(AbsEnv):
 
     point_l = .5
     grab_counter = 0
+
+    state_names = ['θ1', 'θ2', 'Δx2', 'Δy2']
 
     def __init__(self):
         # node1 (d_rad, x, y),
@@ -69,12 +60,8 @@ class ArmEnv(AbsEnv):
         # action = (node1 angular v, node2 angular v)
         u = np.clip(u, self.u_low, self.u_high)
 
-        if MODE == "clamp":
-            self.state[0] = np.clip(self.state[0] + u[0] * self.dt, -pi, pi)
-            self.state[1] = np.clip(self.state[1] + u[1] * self.dt, -pi, pi)
-        elif MODE == "wrap":
-            self.state[0] = angle_normalize(self.state[0] + u[0] * self.dt)
-            self.state[1] = angle_normalize(self.state[1] + u[1] * self.dt)
+        self.state[0] = angle_normalize(self.state[0] + u[0] * self.dt)
+        self.state[1] = angle_normalize(self.state[1] + u[1] * self.dt)
 
         assert any(self.state <= pi) & any(self.state >= -pi)
 
@@ -88,12 +75,9 @@ class ArmEnv(AbsEnv):
         self.state[1] = arm2rad
 
     def _reset_target(self):
-        if TARGET == "positions":
-            angle = np.random.rand(1)[0] * pi * 2 - pi
-            radius = np.random.rand(1)[0] * (self.LINK_LENGTH_1 + self.LINK_LENGTH_2)
-            self.point_info = radius * np.array([cos(angle), sin(angle)])
-        elif TARGET == "angles":
-            self.point_info = np.random.rand(2) * pi * 2 - pi
+        angle = np.random.rand(1)[0] * pi * 2 - pi
+        radius = np.random.rand(1)[0] * (self.LINK_LENGTH_1 + self.LINK_LENGTH_2)
+        self.point_info = radius * np.array([cos(angle), sin(angle)])
 
     def reset(self):
         self.get_point = False
@@ -111,20 +95,11 @@ class ArmEnv(AbsEnv):
         xy2 = xy1 + arm2dx_dy  # (x2, y2)
 
         # return the distance (dx, dy) between arm finger point with blue point
-        if TARGET == "positions":
-            delta2 = np.ravel(xy2 - self.point_info)
-        elif TARGET == "angles":
-            delta2 = np.ravel(self.state[:2] - self.point_info)
-            # delta2[0] = angle_normalize(delta2[0])
-            # delta2[1] = angle_normalize(delta2[1])
+        delta2 = np.ravel(xy2 - self.point_info)
 
-        if OBS == "sin/cos":
-            return np.hstack([arm1dx_dy[0], arm1dx_dy[1],
-                              arm2dx_dy[0], arm2dx_dy[1],
-                              arm2dx_dy[0] - self.point_info[0], arm2dx_dy[1]-self.point_info[1]]), delta2
-        elif OBS == "angles":
-            return np.hstack([self.state[0], self.state[1],
-                              self.point_info[0], self.point_info[1]]), delta2
+        return np.hstack([xy1[0], xy1[1],
+                          xy2[0], xy2[1],
+                          delta2[0], delta2[1]]), delta2
 
     def _r_func(self, distance):
         t = 50
@@ -172,100 +147,57 @@ class ArmEnv(AbsEnv):
             circ.set_color(.8, .8, 0)
             circ.add_attr(jtransform)
 
-        if TARGET == "positions":
-            target = self.viewer.draw_circle(.1)
-            target.set_color(8, 0, 0)
-            ttransform = rendering.Transform(translation=(self.point_info[0], self.point_info[1]))
-            target.add_attr(ttransform)
-        elif TARGET == "angles":
-            pt = self.point_info
-            pt1 = [self.LINK_LENGTH_1 * cos(pt[0]), self.LINK_LENGTH_1 * sin(pt[0])]
-            pt2 = [p1[0] + self.LINK_LENGTH_2 * cos(pt[0] + pt[1]),
-                   p1[1] + self.LINK_LENGTH_2 * sin(pt[0] + pt[1])]
-            xys = np.array([[0, 0], pt1, pt2])  # [:, ::-1]
-            thetas = [pt[0], pt[0] + pt[1]]
-            link_lengths = [self.LINK_LENGTH_1, self.LINK_LENGTH_2]
-            for ((x, y), th, llen) in zip(xys, thetas, link_lengths):
-                l, r, t, b = 0, llen, .1, -.1
-                jtransform = rendering.Transform(rotation=th, translation=(x, y))
-                link = self.viewer.draw_polygon([(l, b), (l, t), (r, t), (r, b)])
-                link.add_attr(jtransform)
-                link._color.vec4 = (0, .8, .8, .2)
-                circ = self.viewer.draw_circle(.1)
-                circ._color.vec4 = (.8, .8, 0, .2)
-                circ.add_attr(jtransform)
+        target = self.viewer.draw_circle(.1)
+        target.set_color(8, 0, 0)
+        ttransform = rendering.Transform(translation=(self.point_info[0], self.point_info[1]))
+        target.add_attr(ttransform)
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
     def step_batch(self, x, u):
         u = torch.max(torch.min(u, self.u_high_torch), self.u_low_torch)
 
-        if OBS == "angles":
-            theta1 = x[:, 0:1]
-            theta2 = x[:, 1:2]
-        elif OBS == "sin/cos":
-            # -π <= atan2() <= π
-            c1, s1, c2, s2 = x[:, 0:1], x[:, 1:2], x[:, 2:3], x[:, 3:4]
-            theta1 = torch.atan2(s1, c1)
-            theta2 = torch.atan2(s2, c2)
+        # -π <= atan2() <= π
+        xy1, xy2 = x[:, :2], x[:, 2:4]
+        dx2 = xy1 - xy2
+        glob_ang = torch.cat((torch.atan2(xy1[:, 1:2], xy1[:, 0:1]),
+                              torch.atan2(dx2[:, 1:2], dx2[:, 0:1])), dim=1)
+        ang1 = glob_ang[:, :1]
+        ang2 = glob_ang[:, 1:] - ang1
+        delta_p = x[:, 4:]
+        target = delta_p - xy2
 
-        if MODE == "clamp":
-            theta1 = torch.clamp(theta1 + u[:, :1] * self.dt, min=-pi, max=pi)
-            theta2 = torch.clamp(theta2 + u[:, 1:] * self.dt, min=-pi, max=pi)
-        elif MODE == "wrap":
-            theta1 = angle_normalize(theta1 + u[:, :1] * self.dt)
-            theta2 = angle_normalize(theta2 + u[:, 1:] * self.dt)
+        theta1 = ang1 + u[:, :1] * self.dt
+        theta2 = ang2 + u[:, 1:] * self.dt
 
-        if OBS == "angles":
-            state = torch.cat((theta1, theta2), dim=1)
-        elif OBS == "sin/cos":
-            state = torch.cat((torch.cos(theta1), torch.sin(theta1), torch.cos(theta2), torch.sin(theta2)), dim=1)
+        state = torch.cat((theta1, theta2), dim=1)
+        return self._get_obs_from_state(state, target)
 
-        return state
+    def _get_obs_from_state(self, state, target):
+        ang = state[:, :2]
+        arm1rad, arm2rad = ang[:, :1], ang[:, 1:]
+        xy1 = torch.cat((self.LINK_LENGTH_1 * torch.cos(arm1rad), self.LINK_LENGTH_1 * torch.sin(arm1rad)), dim=1)
+        xy2 = xy1 + torch.cat((self.LINK_LENGTH_2 * torch.cos(arm1rad + arm2rad),
+                               self.LINK_LENGTH_2 * torch.sin(arm1rad + arm2rad)), dim=1)
 
-    def benchmark_data(self, data={}):
-        if len(data) == 0:
-            data = {'arm2_distance': [],
-                    'velocity_arm2_distance': [],
-                    'acceleration_arm2_distance': [],
-                    'jerk_arm2_distance': []}
+        delta_p = target - xy2
+        return torch.cat((xy1[:, :1], xy1[:, 1:],
+                          xy2[:, :1], xy2[:, 1:],
+                           delta_p[:, :1], delta_p[:, 1:]), dim=1)
 
-        arm2_distance = self._get_obs()[1]
-        data['arm2_distance'].append(arm2_distance)
+    def get_state_from_obs(self, x):
+        xy1, xy2 = x[:, :2], x[:, 2:4]
+        dx2 = xy1 - xy2
 
-        if len(data['arm2_distance']) >= 2:
-            data['velocity_arm2_distance'].append(data['arm2_distance'][-1] - data['arm2_distance'][-2])
-
-        if len(data['velocity_arm2_distance']) >= 3:
-            data['acceleration_arm2_distance'].append(data['velocity_arm2_distance'][-1] - data['velocity_arm2_distance'][-2])
-
-        if len(data['acceleration_arm2_distance']) >= 4:
-            data['jerk_arm2_distance'].append(data['acceleration_arm2_distance'][-1] - data['acceleration_arm2_distance'][-2])
-
-        return data
+        glob_ang = torch.cat((torch.atan2(xy1[:, 1:2], xy1[:, 0:1]),
+                              torch.atan2(dx2[:, 1:2], dx2[:, 0:1])), dim=1)
+        ang1 = glob_ang[:, :1]
+        ang2 = angle_normalize(glob_ang[:, 1:] - ang1)
+        return torch.cat((ang1, ang2, x[:, 4:]), dim=1)
 
 
 def angle_normalize(x):
     return (((x+pi) % (2*pi)) - pi)
-
-
-def wrap(x, m, M):
-    """Wraps ``x`` so m <= x <= M; but unlike ``bound()`` which
-    truncates, ``wrap()`` wraps x around the coordinate system defined by m,M.\n
-    For example, m = -180, M = 180 (degrees), x = 360 --> returns 0.
-    Args:
-        x: a scalar
-        m: minimum possible value in range
-        M: maximum possible value in range
-    Returns:
-        x: a scalar, wrapped
-    """
-    diff = M - m
-    while x > M:
-        x = x - diff
-    while x < m:
-        x = x + diff
-    return x
 
 if __name__ == '__main__':
     env = ArmEnv()
