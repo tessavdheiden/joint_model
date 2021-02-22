@@ -8,7 +8,6 @@ import pandas as pd
 from envs import *
 from viz import *
 from empowerment.empowerment import Empowerment
-from controller import Controller
 from filters.bayes_filter import BayesFilter
 from filters.bayes_filter_fully_connected import BayesFilterFullyConnected
 from filters.simple_filter import SimpleFilter
@@ -19,13 +18,13 @@ def train_empowerment(env, empowerment, replay_memory, args, bayes_filter=None):
     rp = RecordPlot()
     lp = LandscapePlot()
     cast = lambda x: x.detach().numpy()
+    empowerment.prepare_update()
 
     for i in range(args.num_epochs):
         replay_memory.reset_batchptr_train()
         t0 = time.time()
         E = np.zeros((replay_memory.n_batches_train, args.batch_size * args.seq_length))
 
-        empowerment.prepare_update()
         for b in range(replay_memory.n_batches_train):
             batch_dict = replay_memory.next_batch_train()
             x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
@@ -44,6 +43,8 @@ def train_empowerment(env, empowerment, replay_memory, args, bayes_filter=None):
                 x = cast(env.get_state_from_obs(x))
                 lp.add(xy=pd.DataFrame(x, index=np.arange(len(x)), columns=env.state_names), z=cast(e).reshape(-1, 1))
                 lp.plot('img/landscape')
+                empowerment.save_params()
+            empowerment.prepare_update()
 
         rp.add(i, E.mean())
         print(f'ep = {i}, empowerment = {E.mean():.4f} time = {time.time()-t0:.2f}')
@@ -61,9 +62,9 @@ def main():
     parser.add_argument('--seq_length', type=int, default=100, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=128, help='minibatch size')
     parser.add_argument('--num_epochs', type=int, default=2001, help='number of epochs')
-    parser.add_argument('--n_trials', type=int, default=2000,
+    parser.add_argument('--n_trials', type=int, default=500,
                         help='number of data sequences to collect in each episode')
-    parser.add_argument('--trial_len', type=int, default=128, help='number of steps in each trial')
+    parser.add_argument('--trial_len', type=int, default=100, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=4,
                         help='number of subsequences to divide each sequence into')
     parser.add_argument('--env', type=str, default='controlled_reacher',
@@ -93,12 +94,11 @@ def main():
         env = ReacherControlledEnv()
     env.seed(0)
 
-    controller = Controller(env)
-    replay_memory = ReplayMemory(args, controller=controller, env=env)
+    replay_memory = ReplayMemory(args, env)
 
     # assert bayes_filter.T == replay_memory.seq_length
 
-    empowerment = Empowerment(env, controller=controller)
+    empowerment = Empowerment(env)
     if args.use_filter:
         if args.filter_type == 0:
             bayes_filter = BayesFilter.init_from_save()

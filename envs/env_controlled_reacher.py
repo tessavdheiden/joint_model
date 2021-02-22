@@ -146,7 +146,7 @@ class Env(AbsEnv):
         return r
 
     def _reset_target(self):
-        self.target = np.random.rand(2) * 2 * pi - pi
+        self.target = self.state[:2] + np.random.rand(2) * pi / 180. * 20
 
     def _reset_state(self):
         theta = np.random.rand(2) * pi * 2 - pi
@@ -158,8 +158,9 @@ class Env(AbsEnv):
         self.grab_counter = 0
         self.p = np.random.rand(2) * self.MAX_GAIN_P
         self.d = np.random.rand(2) * self.MAX_GAIN_D
-        self._reset_target()
+
         self._reset_state()
+        self._reset_target()
         return self._get_obs()[0]
 
     def get_benchmark_data(self, data={}):
@@ -307,8 +308,8 @@ class ReacherControlledEnv(nn.Module, Env):
 
         state_, action = solution
         state_ = state_[-1] # last time step
-        state_[:, 2:3] = torch.clamp(state_[:, 2:3].clone(), -self.MAX_VEL_1, self.MAX_VEL_1)
-        state_[:, 3:4] = torch.clamp(state_[:, 3:4].clone(), -self.MAX_VEL_2, self.MAX_VEL_2)
+        state_[:, 2:3] = torch.clamp(state_[:, 2:3], -self.MAX_VEL_1, self.MAX_VEL_1)
+        state_[:, 3:4] = torch.clamp(state_[:, 3:4], -self.MAX_VEL_2, self.MAX_VEL_2)
         return self._get_obs_from_state(state_, target, p, d)
 
     def _get_obs_from_state(self, state, target, p, d):

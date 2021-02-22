@@ -7,7 +7,7 @@ import progressbar
 
 # Class to load and preprocess data
 class ReplayMemory():
-    def __init__(self, args, controller, env):
+    def __init__(self, args, env):
         self.batch_size = args.batch_size
         self.seq_length = args.seq_length
         # self.shift_x = shift
@@ -20,7 +20,7 @@ class ReplayMemory():
         self.trial_len = args.trial_len
         self.env = env
         self.state_dim = env.observation_space.shape[0]
-        self.action_dim = controller.action_space.shape[0]
+        self.action_dim = env.action_space.shape[0]
 
         print('validation fraction: ', args.val_frac)
 

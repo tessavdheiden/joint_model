@@ -5,7 +5,7 @@ from torch.distributions import Normal
 import torch.optim as optim
 
 
-N_STEP = 1
+N_STEP = 100
 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -33,18 +33,18 @@ class Net(nn.Module):
 
 
 class Empowerment(nn.Module):
-    def __init__(self, env, controller):
+    def __init__(self, env):
         super(Empowerment, self).__init__()
         self.h_dim = 128
-        self.action_dim = controller.action_space.shape[0]
+        self.action_dim = env.action_space.shape[0]
         self.z_dim = env.observation_space.shape[0]
 
         if env.name == 'controlled_reacher':
-            self.flt_ω = lambda x: x#x[:, -4:] # only pd
-            self.flt_q = lambda x: x#torch.cat((x[:, :6], x[:, 8:12],
-                                              # x[:, 12:18]), dim=1) # except pd at t+1
-            self.ω = Net(self.z_dim, self.action_dim, self.h_dim)
-            self.q = Net(self.z_dim*2, self.action_dim, self.h_dim)
+            self.flt_ω = lambda x: x[:, -4:] # only pd
+            self.flt_q = lambda x, x_: torch.cat((x[:, :6], x[:, -4:], x_[:, :6]), dim=1)    # except pd at t+1 and Δθ
+            self.ω = Net(4, self.action_dim, self.h_dim)
+            self.q = Net(16, self.action_dim, self.h_dim)
+            self.auto_regressive = None
             self.opt_q = optim.Adam(self.q.parameters(), lr=1e-4)
             self.forward = self.fwd_step
         else:
@@ -118,7 +118,7 @@ class Empowerment(nn.Module):
         for t in range(1, N_STEP):
             z_ = self.env.step_batch(z_, torch.zeros_like(a_ω))   # n state propagations with no PD update
 
-        z_q = self.flt_q(torch.cat((z, z_), dim=1))     # q does not observe PD_t+n
+        z_q = self.flt_q(z, z_)     # q does not observe PD_t+n
         (μ_q, σ_q) = self.q(z_q)
         dist_q = Normal(μ_q, σ_q)
 
@@ -144,7 +144,10 @@ class Empowerment(nn.Module):
 
     @property
     def networks(self):
-        return [self.ω, self.q]
+        if self.auto_regressive == None:
+            return [self.ω, self.q]
+        else:
+            return [self.ω, self.q, self.auto_regressive]
 
     def prepare_update(self):
         if DEVICE == 'cuda':
@@ -161,3 +164,12 @@ class Empowerment(nn.Module):
         for network in self.networks:
             network = self.cast(network)
             network.eval()
+
+    def save_params(self, path='param/empowerment.pkl'):
+        save_dict = {'networks': [network.state_dict() for network in self.networks]}
+        torch.save(save_dict, path)
+
+    def init_from_save(self, path='param/empowerment.pkl'):
+        save_dict = torch.load(path)
+        for network, params in zip(self.networks, save_dict['networks']):
+            network.load_state_dict(params)

@@ -36,7 +36,7 @@ MEMORY_CAPACITY = 5000
 BATCH_SIZE = 16
 VAR_MIN = 0.1
 RENDER = True
-LOAD = True
+LOAD = False
 MODE = ['easy', 'hard']
 n_model = 1
 
@@ -215,6 +215,11 @@ else:
 
 
 def train():
+    from empowerment.empowerment import Empowerment
+    empowerment = Empowerment(env)
+    empowerment.init_from_save()
+    empowerment.prepare_eval()
+
     var = 2.  # control exploration
     rewards = []
     for ep in range(MAX_EPISODES):
@@ -228,9 +233,10 @@ def train():
 
             # Added exploration noise
             a = actor.choose_action(s)
-            #a = rl.act(s)[0]
             a = np.clip(np.random.normal(a, var), -ACTION_BOUND, ACTION_BOUND)  # add randomness to action selection for exploration
             s_, r, done, _ = env.step(a)
+            e = empowerment(torch.from_numpy(s).unsqueeze(0).float())
+            r = e.detach().numpy().reshape(-1)[0]
             M.store_transition(s, a, r, s_)
 
             if M.pointer > MEMORY_CAPACITY:
@@ -265,11 +271,13 @@ def train():
     plt.scatter(np.arange(len(rewards)), rewards)
     plt.savefig('img/reward_policy.png')
 
-
+import torch
 def eval():
     from envs.env_controlled_reacher import set
+
     s = env.reset()
     set(env, task="turn quarter circle")
+
     b = BenchmarkPlot()
     v = Video()
 
@@ -279,6 +287,7 @@ def eval():
         if RENDER:
             v.add(env.render(mode='rgb_array'))
         a = actor.choose_action(s)
+
         s_, r, done, _ = env.step(a)
         data = env.get_benchmark_data(data)
         s = s_
