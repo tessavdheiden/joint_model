@@ -23,5 +23,5 @@ class LandscapePlot(object):
             ax.set_xlabel(to_latex(xname))
             ax.set_ylabel(to_latex(yname))
             plt.tight_layout()
-            plt.savefig(f'{save_path}_{xname}_vs_x{yname}.png')
+            plt.savefig(f'{save_path}_{xname}_vs_{yname}.png')
 

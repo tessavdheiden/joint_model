@@ -9,7 +9,7 @@ from envs.env_abs import AbsEnv
 
 class ArmEnv(AbsEnv):
     '''
-    [cos(theta1) sin(theta1) cos(theta2) sin(theta2) thetaDot1 thetaDot2]
+    [cos(θ1) sin(θ1) cos(θ2) sin(θ2) Δx2 Δy2]
     '''
     metadata = {
         'render.modes': ['human', 'rgb_array'],

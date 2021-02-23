@@ -28,6 +28,7 @@ class Tanh2DEnv(AbsEnv):
         high=s_max, shape=(2,),
         dtype=np.float32
     )
+    state_names =['x', 'y']
 
     def __init__(self):
         self.name = 'Sigmoid2D'
@@ -77,6 +78,9 @@ class Tanh2DEnv(AbsEnv):
         lo = torch.from_numpy(self.u_low).float()
         u = torch.max(torch.min(u, up), lo)
         return torch.tanh(x + u * self.dt)
+
+    def get_state_from_obs(self, obs):
+        return obs
 
 
 if __name__ == '__main__':

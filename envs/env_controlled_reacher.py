@@ -10,7 +10,8 @@ from envs.env_abs import AbsEnv
 
 
 class Env(AbsEnv):
-    dt = .1
+    dt = .5
+    TARGET_CHANGE = .05
 
     LINK_LENGTH_1 = 1.  # [m]
     LINK_LENGTH_2 = 1.  # [m]
@@ -22,7 +23,7 @@ class Env(AbsEnv):
 
     MAX_GAIN_P = 2.
     MAX_GAIN_D = 2.
-    MAX_GAIN_CHANGE = 1.
+    MAX_GAIN_CHANGE = 2.
 
     MAX_TORQUE = 1.
 
@@ -86,7 +87,11 @@ class Env(AbsEnv):
 
         return (dtheta1, dtheta2, ddtheta1, ddtheta2, 0., 0.)
 
+    def _step_target(self):
+        self.target += np.ones(2) * self.TARGET_CHANGE
+
     def step(self, a):
+        self._step_target()
         a = np.clip(a, -self.MAX_GAIN_CHANGE, self.MAX_GAIN_CHANGE)
 
         deltaP = angle_normalize(self.target - self.state[:2])
@@ -147,7 +152,8 @@ class Env(AbsEnv):
         return r
 
     def _reset_target(self):
-        self.target = self.state[:2] + np.random.rand(2) * pi / 180. * 20
+        # self.target = self.state[:2] + np.random.rand(2) * pi / 180. * 20
+        self.target = self.state[:2]
 
     def _reset_state(self):
         theta = np.random.rand(2) * pi * 2 - pi
@@ -294,7 +300,7 @@ class ReacherControlledEnv(nn.Module, Env):
         angle = torch.cat((torch.atan2(pos[:, 1:2], pos[:, 0:1]), torch.atan2(pos[:, 3:4], pos[:, 2:3])), dim=1)
 
         delta_p = x[:, 6:8]
-        target = delta_p + angle
+        target = delta_p + angle + self.TARGET_CHANGE
         #deltaP = angle_normalize(target - angle)
         delta_v = -vel
         p = x[:, 8:10]
@@ -392,13 +398,17 @@ def make_video():
     v = Video()
 
     env.reset()
-    set(env, params='good', task="turn quarter circle")
+    #set(env, params='good', task="turn both angles")
+    # env.p=np.array([1.25, .75])
+    # env.d=np.array([.75, 1.])
+    env.p=np.array([1.25, .5])
+    env.d=np.array([.8, 1.5])
     for _ in range(100):
         v.add(env.render(mode='rgb_array'))
         a = env.action_space.sample() * 0
         env.step(a)
 
-    v.save('../img/video.gif')
+    v.save(f'../img/p={env.p}_d={env.d}.gif')
     env.close()
 
 
@@ -443,8 +453,8 @@ def use_torchdiffeq():
 
 if __name__ == '__main__':
     make_video()
-    make_plot()
-    use_torchdiffeq()
+    # make_plot()
+    # use_torchdiffeq()
 
 
 

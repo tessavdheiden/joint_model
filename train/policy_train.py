@@ -36,11 +36,11 @@ MEMORY_CAPACITY = 5000
 BATCH_SIZE = 16
 VAR_MIN = 0.1
 RENDER = True
-LOAD = False
+LOAD = True
 MODE = ['easy', 'hard']
 n_model = 1
 
-env = ArmEnv()
+env = ReacherControlledEnv()
 STATE_DIM = env.observation_space.shape[0]
 ACTION_DIM = env.action_dim
 ACTION_BOUND = env.u_high
@@ -276,7 +276,7 @@ def eval():
     from envs.env_controlled_reacher import set
 
     s = env.reset()
-    set(env, task="turn quarter circle")
+    set(env, task="turn half circle")
 
     b = BenchmarkPlot()
     v = Video()
