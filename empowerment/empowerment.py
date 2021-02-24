@@ -5,7 +5,7 @@ from torch.distributions import Normal
 import torch.optim as optim
 
 
-N_STEP = 10
+N_STEP = 100
 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

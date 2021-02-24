@@ -155,7 +155,7 @@ class Env(AbsEnv):
 
         self._reset_state()
         self._reset_target()
-        return self._get_obs()[0]
+        return self._get_obs()
 
     def get_benchmark_data(self, data={}):
         if len(data) == 0:
