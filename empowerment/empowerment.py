@@ -5,7 +5,7 @@ from torch.distributions import Normal
 import torch.optim as optim
 
 
-N_STEP = 100
+N_STEP = 10
 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -39,7 +39,7 @@ def filter_q(x, x_):
     for i in range(len(x_)):
         x_[i] = x_[i][:, :6]
     x_ = torch.cat(x_, dim=1)
-    return torch.cat((x[:, :6], x[:, -4:], x_), dim=1)
+    return torch.cat((x[:, :10], x_), dim=1)
 
 class Empowerment(nn.Module):
     def __init__(self, env):
@@ -49,7 +49,7 @@ class Empowerment(nn.Module):
         self.z_dim = env.observation_space.shape[0]
 
         if env.name == 'controlled_reacher':
-            self.flt_ω = lambda x: x[:, -4:] # only pd
+            self.flt_ω = lambda x: x[:, 6:10] # only pd
             #self.flt_q = lambda x, x_: torch.cat((x[:, :6], x[:, -4:], x_[:, :6]), dim=1)    # except pd at t+1 and Δθ
             self.flt_q = filter_q
             self.ω = Net(4, self.action_dim, self.h_dim)
