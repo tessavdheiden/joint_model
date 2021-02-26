@@ -18,7 +18,7 @@ class LandscapePlot(object):
             y = self.xy[yname].values
             fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(4, 4))
             c = ax.hexbin(x, y, gridsize=20, C=self.z[:], mincnt=1, vmin=self.z.mean() - .1)
-
+            plt.colorbar(c)
             ax.set_xlabel(to_latex(xname))
             ax.set_ylabel(to_latex(yname))
             ax.axis('square')
