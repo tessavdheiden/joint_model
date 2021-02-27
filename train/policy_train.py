@@ -25,7 +25,7 @@ from viz import *
 np.random.seed(30)
 tf.random.set_seed(1)
 
-MAX_EPISODES = 100
+MAX_EPISODES = 200
 MAX_EP_STEPS = 100
 LR_A = 1e-4  # learning rate for actor
 LR_C = 1e-4  # learning rate for critic
@@ -36,7 +36,7 @@ MEMORY_CAPACITY = 5000
 BATCH_SIZE = 16
 VAR_MIN = 0.1
 RENDER = True
-LOAD = False
+LOAD = True
 EMPOWERMENT = True
 MODE = ['easy', 'hard']
 n_model = 1
@@ -239,7 +239,7 @@ def train():
             s_, r, done, _ = env.step(a)
             if EMPOWERMENT:
                 e = empowerment(torch.from_numpy(s_).unsqueeze(0).float())
-                r = e.detach().numpy().reshape(-1)[0]
+                r = -e.detach().numpy().reshape(-1)[0]
             M.store_transition(s, a, r, s_)
 
             if M.pointer > MEMORY_CAPACITY:
@@ -266,8 +266,8 @@ def train():
                       )
                 break
         rewards.append(ep_reward)
-    if os.path.isdir(path): shutil.rmtree(path)
-    os.mkdir(path)
+    if not os.path.exists('../param'):
+        print('empowerment not trained')
     ckpt_path = os.path.join('./' + 'param', 'DDPG.ckpt')
     save_path = saver.save(sess, ckpt_path, write_meta_graph=False)
     print("\nSave Model %s\n" % save_path)

@@ -21,11 +21,11 @@ class Env(AbsEnv):
     MAX_VEL_1 = 4 * pi
     MAX_VEL_2 = 9 * pi
 
-    MAX_GAIN_P = 4.
-    MAX_GAIN_D = 4.
-    MAX_GAIN_CHANGE = 1.
+    MAX_GAIN_P = 12.
+    MAX_GAIN_D = 12.
+    MAX_GAIN_CHANGE = 8.
 
-    MAX_TORQUE = 100.
+    MAX_TORQUE = 1.
 
     action_dim = 4
     u_high = np.array([MAX_GAIN_CHANGE, MAX_GAIN_CHANGE, MAX_GAIN_CHANGE, MAX_GAIN_CHANGE])
@@ -141,7 +141,7 @@ class Env(AbsEnv):
         self.target = self.state[:2]
 
     def _reset_state(self):
-        theta = np.zeros(2)
+        theta = np.random.rand(2) * 2 * pi - pi
         dtheta = np.zeros(2)
         self.state = np.array([theta[0], theta[1], dtheta[0], dtheta[1]])
 
@@ -157,12 +157,18 @@ class Env(AbsEnv):
 
     def get_benchmark_data(self, data={}):
         if len(data) == 0:
-            names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'ddotθ1', 'ddotθ2', 'dddotθ1', 'dddotθ2']
+            names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'ddotθ1', 'ddotθ2', 'dddotθ1', 'dddotθ2', 'p1', 'p2', 'd1', 'd2']
             data = {name: [] for name in names}
 
         names = list(data.keys())
         for i, name in enumerate(names[:4]):
             data[name].append(self.state[i])
+
+        for i, name in enumerate(names[-4:]):
+            if i < 2:
+                data[name].append(self.p[i])
+            else:
+                data[name].append(self.d[i-2])
 
         return data
 
@@ -172,8 +178,10 @@ class Env(AbsEnv):
         for i, name in enumerate(names):
             if i < 4:
                 data[name] = np.array(data[name])
-            else:
+            elif i < 12:
                 data[name] = np.diff(data[names[i-2]]) / self.dt
+            else:
+                data[name] = np.array(data[name])
 
         return data
 
