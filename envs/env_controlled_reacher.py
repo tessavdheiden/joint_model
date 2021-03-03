@@ -21,14 +21,14 @@ class Env(AbsEnv):
     MAX_VEL_1 = 4 * pi
     MAX_VEL_2 = 9 * pi
 
-    MAX_GAIN_P = 12.
-    MAX_GAIN_D = 12.
-    MAX_GAIN_CHANGE = 8.
+    MAX_GAIN_P = 2.
+    MAX_GAIN_D = 1.
+    MAX_GAIN_CHANGE = 1.
 
     MAX_TORQUE = 1.
 
-    action_dim = 4
-    u_high = np.array([MAX_GAIN_CHANGE, MAX_GAIN_CHANGE, MAX_GAIN_CHANGE, MAX_GAIN_CHANGE])
+    action_dim = 2
+    u_high = np.array([MAX_GAIN_CHANGE, MAX_GAIN_CHANGE])
     u_low = -u_high
     action_space = spaces.Box(
         low=u_low,
@@ -38,12 +38,12 @@ class Env(AbsEnv):
 
     # cos/sin of 2 angles, 2 angular vel, 2 angle errors, 2 vel errors, 2 p's, 2 d's
     high = np.array([1, 1, 1, 1, MAX_VEL_1, MAX_VEL_2, pi, pi,
-                     MAX_GAIN_P, MAX_GAIN_P, MAX_GAIN_D, MAX_GAIN_D], dtype=np.float32)
-    low = np.array([-1, -1, -1, -1, -MAX_VEL_1, -MAX_VEL_2, -pi, -pi, 0, 0, 0, 0], dtype=np.float32)
-    state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'p1', 'p2', 'd1', 'd2', 'xt', 'yt']
+                     MAX_GAIN_P, MAX_GAIN_D], dtype=np.float32)
+    low = np.array([-1, -1, -1, -1, -MAX_VEL_1, -MAX_VEL_2, -pi, -pi, 0, 0], dtype=np.float32)
+    state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'p', 'd', 'θ1t', 'θ2t']
     observation_space = spaces.Box(
         low=low,
-        high=high, shape=(12,),
+        high=high, shape=(10,),
         dtype=np.float32
     )
     viewer = None
@@ -54,8 +54,8 @@ class Env(AbsEnv):
 
     def __init__(self):
         self.state = np.zeros(4)
-        self.p = np.zeros(2)
-        self.d = np.zeros(2)
+        self.p = np.zeros(1)
+        self.d = np.zeros(1)
         self.target = np.zeros(2)
 
     def _dsdt(self, s_augmented, t):
@@ -96,8 +96,8 @@ class Env(AbsEnv):
         delta_p = angle_normalize(self.target - self.state[:2])
         delta_v = -self.state[2:]
 
-        self.p = np.maximum(self.p + a[:2] * self.dt, 0)
-        self.d = np.maximum(self.d + a[2:] * self.dt, 0)
+        self.p = np.maximum(self.p + a[:1] * self.dt, 0)
+        self.d = np.maximum(self.d + a[1:] * self.dt, 0)
 
         torque = np.clip(self.p * delta_p + self.d * delta_v, -self.MAX_TORQUE, self.MAX_TORQUE)
         s_augmented = np.hstack((self.state, torque))
@@ -118,7 +118,7 @@ class Env(AbsEnv):
         return np.hstack([np.cos(self.state[0]), np.sin(self.state[0]),
                           np.cos(self.state[1]), np.sin(self.state[1]),
                           self.state[2], self.state[3],
-                          self.p[0], self.p[1], self.d[0], self.d[1],
+                          self.p[0], self.d[0],
                           self.target[0], self.target[1]])
 
     def _r_func(self, distance):
@@ -141,15 +141,15 @@ class Env(AbsEnv):
         self.target = self.state[:2]
 
     def _reset_state(self):
-        theta = np.random.rand(2) * 2 * pi - pi
+        theta = np.random.rand(2)*2*pi-pi#np.zeros(2)
         dtheta = np.zeros(2)
         self.state = np.array([theta[0], theta[1], dtheta[0], dtheta[1]])
 
     def reset(self):
         self.get_point = False
         self.grab_counter = 0
-        self.p = np.random.rand(2) * self.MAX_GAIN_P
-        self.d = np.random.rand(2) * self.MAX_GAIN_D
+        self.p = np.random.rand(1) * self.MAX_GAIN_P
+        self.d = np.random.rand(1) * self.MAX_GAIN_D
 
         self._reset_state()
         self._reset_target()
@@ -157,18 +157,17 @@ class Env(AbsEnv):
 
     def get_benchmark_data(self, data={}):
         if len(data) == 0:
-            names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'ddotθ1', 'ddotθ2', 'dddotθ1', 'dddotθ2', 'p1', 'p2', 'd1', 'd2']
+            names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'ddotθ1', 'ddotθ2', 'dddotθ1', 'dddotθ2', 'p', 'd', 'Δθ1', 'Δθ2']
             data = {name: [] for name in names}
 
         names = list(data.keys())
         for i, name in enumerate(names[:4]):
             data[name].append(self.state[i])
 
-        for i, name in enumerate(names[-4:]):
-            if i < 2:
-                data[name].append(self.p[i])
-            else:
-                data[name].append(self.d[i-2])
+        data['p'].append(self.p[0])
+        data['d'].append(self.d[0])
+        data['Δθ1'].append(angle_normalize(self.target[0] - self.state[0]))
+        data['Δθ2'].append(angle_normalize(self.target[1] - self.state[1]))
 
         return data
 
@@ -178,7 +177,7 @@ class Env(AbsEnv):
         for i, name in enumerate(names):
             if i < 4:
                 data[name] = np.array(data[name])
-            elif i < 12:
+            elif i < 8:
                 data[name] = np.diff(data[names[i-2]]) / self.dt
             else:
                 data[name] = np.array(data[name])
@@ -284,7 +283,7 @@ class ReacherControlledEnv(nn.Module, Env):
         return (dtheta1, dtheta2, ddtheta1, ddtheta2, torch.zeros_like(tau1), torch.zeros_like(tau2))
 
     def step_batch(self, x, u, update=False):
-        target = x[:, 10:12]
+        target = x[:, 8:10]
 
         u = torch.clamp(u, -self.MAX_GAIN_CHANGE, self.MAX_GAIN_CHANGE)
 
@@ -296,8 +295,8 @@ class ReacherControlledEnv(nn.Module, Env):
         if update:
             self.target = target[0].detach().numpy()
 
-        p = torch.clamp(x[:, 6:8] + u[:, :2] * self.dt, 0.)
-        d = torch.clamp(x[:, 8:10] + u[:, 2:] * self.dt, 0.)
+        p = torch.clamp(x[:, 6:7] + u[:, :1] * self.dt, 0.)
+        d = torch.clamp(x[:, 7:8] + u[:, 1:] * self.dt, 0.)
 
         torque = torch.clamp(p * delta_p + d * delta_v, -self.MAX_TORQUE, self.MAX_TORQUE)
         s_aug = (torch.cat((angle, vel), dim=1), torque)
@@ -316,7 +315,7 @@ class ReacherControlledEnv(nn.Module, Env):
         return torch.cat((torch.cos(ang[:, 0:1]), torch.sin(ang[:, 0:1]),
                           torch.cos(ang[:, 1:2]), torch.sin(ang[:, 1:2]),
                           vel[:, 0:1], vel[:, 1:2],
-                          p[:, 0:1], p[:, 1:2], d[:, 0:1], d[:, 1:2],
+                          p[:, 0:1], d[:, 0:1],
                           target[:, 0:1], target[:, 1:2]), dim=1)
 
     def get_state_from_obs(self, obs):
@@ -423,28 +422,34 @@ def make_plot():
 
 def use_torchdiffeq():
     from itertools import permutations, product
+    from viz.benchmark_plot import BenchmarkPlot
     from viz.video import Video
     env = ReacherControlledEnv()
 
-    l = list(product([.5, 1], repeat=4))
+    l = [-pi, 0, pi]
     print(l)
     for j in range(len(l)):
         v = Video()
+        b = BenchmarkPlot()
         env.reset()
-        env.state = np.array([0, 0, 0, 0])
+        env.state = np.array([0, l[j], 0, 0])
         env.target = env.state[:2]
-        env.p = np.ones_like(env.p) * env.MAX_GAIN_P * l[j][0:2]
-        env.d = np.ones_like(env.p) * env.MAX_GAIN_D * l[j][2:4]
+        env.p = np.ones_like(env.p) * env.MAX_GAIN_P
+        env.d = np.ones_like(env.p) * env.MAX_GAIN_D
         t0, obs_action = env.get_initial_obs_action()
         obs = obs_action[0].unsqueeze(0)
-
+        data = env.get_benchmark_data()
         for i in range(100):
             a = np.zeros_like(env.action_space.sample())
             obs = env.step_batch(x=obs, u=torch.from_numpy(a).float().unsqueeze(0), update=True)
             state = env.get_state_from_obs(obs)[:, :4]  # for rendering
             env.state = state.squeeze(0).detach().numpy()
             v.add(env.render(mode='rgb_array'))
-        v.save(f'../img/p={env.p}_d={env.d}.gif')
+            data = env.get_benchmark_data(data)
+        env.do_benchmark(data)
+        b.add(data)
+        b.plot(f"../img/p={env.p}_d={env.d}.png")
+        v.save(f'../img/p={env.p}_d={env.d}_θ2={l[j]:.2f}.gif')
 
     env.close()
 

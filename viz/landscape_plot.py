@@ -21,6 +21,6 @@ class LandscapePlot(object):
             plt.colorbar(c)
             ax.set_xlabel(to_latex(xname))
             ax.set_ylabel(to_latex(yname))
-            ax.axis('square')
+            #ax.axis('square')
             plt.tight_layout()
             plt.savefig(f'{save_path}_{xname}_vs_{yname}.png')

@@ -39,7 +39,7 @@ def filter_q(x, x_):
     for i in range(len(x_)):
         x_[i] = x_[i][:, :6]
     x_ = torch.cat(x_, dim=1)
-    return torch.cat((x[:, :10], x_), dim=1)
+    return torch.cat((x[:, :8], x_), dim=1)
 
 class Empowerment(nn.Module):
     def __init__(self, env):
@@ -49,11 +49,11 @@ class Empowerment(nn.Module):
         self.z_dim = env.observation_space.shape[0]
 
         if env.name == 'controlled_reacher':
-            self.flt_ω = lambda x: x[:, 6:10] # only pd
+            self.flt_ω = lambda x: x[:, 6:8] # only pd
             #self.flt_q = lambda x, x_: torch.cat((x[:, :6], x[:, -4:], x_[:, :6]), dim=1)    # except pd at t+1 and Δθ
             self.flt_q = filter_q
-            self.ω = Net(4, self.action_dim, self.h_dim)
-            self.q = Net(10 + 6*N_STEP, self.action_dim, self.h_dim)
+            self.ω = Net(2, self.action_dim, self.h_dim)
+            self.q = Net(8 + 6*N_STEP, self.action_dim, self.h_dim)
             self.auto_regressive = None
             self.opt_q = optim.Adam(self.q.parameters(), lr=1e-4)
             self.forward = self.fwd_step
