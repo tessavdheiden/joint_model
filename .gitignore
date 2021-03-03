@@ -132,3 +132,5 @@ dmypy.json
 img/
 param/
 .idea
+*.gif
+*.png

@@ -1,3 +1,4 @@
+from itertools import product
 import numpy as np
 from gym import spaces
 from numpy import sin, cos, pi
@@ -7,17 +8,99 @@ import torch
 from envs.env_abs import AbsEnv
 
 
+class Rectange(object):
+    def __init__(self, top_left, w, h, n):
+        l = top_left[0]
+        t = top_left[1]
+        b = t - h
+        r = l + w
+        top = np.stack(
+            [np.linspace(l, r, n // 4 + 1),
+             np.full(n // 4 + 1, t)],
+            axis=1
+        )[:-1]
+        left = np.stack(
+            [np.full(n // 4 + 1, l),
+             np.linspace(t, b, n // 4 + 1)],
+            axis=1
+        )[:-1]
+        right = left.copy()
+        right[:, 0] += w
+        bottom = top.copy()
+        bottom[:, 1] -= h
+        self.points = np.concatenate([top, right, bottom[::-1], left[::-1]])
+
+        self.corners = (l, b), (l, t), (r, t), (r, b)
+        self.it = 0
+
+    def get_next(self):
+        p = self.points[self.it]
+        self.it = (self.it + 1) % len(self.points)
+        return p
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+
+
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        STATE_DIM = 2
+        H_DIM = 100
+
+        self.fc = nn.Sequential(nn.Linear(STATE_DIM, H_DIM),
+                                nn.ReLU(), nn.BatchNorm1d(H_DIM),
+                                nn.Linear(H_DIM, H_DIM),
+                                nn.ReLU(), nn.BatchNorm1d(H_DIM),
+                                nn.Linear(H_DIM, STATE_DIM))
+
+        self.optimizer = optim.RMSprop(self.fc.parameters(), lr=.0001)
+
+    def forward(self, state):
+        return self.fc(state)
+
+    def update(self, error):
+        self.optimizer.zero_grad()
+        error.backward()
+        self.optimizer.step()
+
+    @property
+    def networks(self):
+        return [self.fc]
+
+    def prepare_update(self):
+        if DEVICE == 'cuda':
+            self.cast = lambda x: x.cuda()
+        else:
+            self.cast = lambda x: x.cpu()
+
+        for network in self.networks:
+            network = self.cast(network)
+            network.train()
+
+    def prepare_eval(self):
+        self.cast = lambda x: x.cpu()
+        for network in self.networks:
+            network = self.cast(network)
+            network.eval()
+
 
 class ArmControlledEnv(AbsEnv):
-    '''
-    [cos(theta1) sin(theta1) cos(theta2) sin(theta2) thetaDot1 thetaDot2]
-    '''
     metadata = {
         'render.modes': ['human', 'rgb_array'],
         'video.frames_per_second': 30
     }
 
-    dt = .1
+    dt = .2
+
+    LINK_LENGTH_1 = 1
+    LINK_LENGTH_2 = 1
+
     u_low = np.array([-1., -1.])
     u_high = np.array([1., 1.])
     action_space = spaces.Box(
@@ -35,63 +118,54 @@ class ArmControlledEnv(AbsEnv):
 
     action_dim = 2
 
-    LINK_LENGTH_1 = 1
-    LINK_LENGTH_2 = 1
-
     point_l = .5
     grab_counter = 0
 
     def __init__(self):
-        # node1 (d_rad, x, y),
-        # node2 (d_rad, x, y)
         self.name = 'Arm'
-        self.state = np.zeros(self.observation_space.shape[0])
-        self.target = np.array([1, 1])
-        self.point_info_init = self.target.copy()
-        self.center_coord = np.array([0, 0])
+        self.state = np.zeros(2)
+        self.target_location = np.zeros(2)
+        self.left_up_corner = (-1, 1.5)
+        self.rect = Rectange(self.left_up_corner, 2, 3, 1000)
 
-        self.last_u = np.array([None, None])
         self.viewer = None
 
         self.u_low_torch = torch.from_numpy(self.u_low).float()
         self.u_high_torch = torch.from_numpy(self.u_high).float()
 
     def step(self, u):
-        # action = (node1 angular v, node2 angular v)
+        self.target = self.rect.get_next()
         u = np.clip(u, self.u_low, self.u_high)
 
-        delta = self.target - self.state[:2]
-        self.p += u * self.dt
-        self.state[0] = angle_normalize(self.state[0] + self.p[0] * delta[0])
-        self.state[1] = angle_normalize(self.state[1] + self.p[1] * delta[1])
+        self.state += u * self.dt
 
-        assert any(self.state <= pi) & any(self.state >= -pi)
-
-        s, arm2_distance = self._get_obs()
-        r = self._r_func(arm2_distance)
-        return s, r, self.get_point, {}
+        obs = self._get_obs()
+        r = self._r_func(obs[4:])
+        return obs, r, self.get_point, {}
 
     def _reset_arm(self):
-        arm1rad, arm2rad = np.random.rand(2) * 2 * pi - pi
-        self.state[0] = arm1rad
-        self.state[1] = arm2rad
+        self.state = np.array([0, -pi])
 
     def _reset_target(self):
-        self.target = np.random.rand(2) * pi * 2 - pi
+        self.target = self.rect.get_next()
 
     def reset(self):
         self.get_point = False
         self.grab_counter = 0
-        self.p = np.random.rand(2) * 2. - 1.
+
         self._reset_target()
         self._reset_arm()
-        return self._get_obs()[0]
+        return self._get_obs()
 
     def _get_obs(self):
+        arm1dx_dy = np.array([self.LINK_LENGTH_1 * cos(self.state[0]), self.LINK_LENGTH_1 * sin(self.state[0])])
+        arm2dx_dy = np.array([self.LINK_LENGTH_2 * cos(self.state[0] + self.state[1]), self.LINK_LENGTH_2 * sin(self.state[0] + self.state[1])])
+        xy2 = arm1dx_dy + arm2dx_dy  # (x2, y2)
+        delta = np.ravel(xy2 - self.target)
 
-        delta = np.ravel(self.target - self.state[:2])
-        return np.hstack([self.state[0], self.state[1],
-                          delta[0], delta[1], self.p[0], self.p[1]]), delta
+        return np.hstack([cos(self.state[0]), sin(self.state[0]),
+                          cos(self.state[1]), sin(self.state[1]),
+                          delta[0], delta[1]])
 
     def _r_func(self, distance):
         t = 50
@@ -117,6 +191,13 @@ class ArmControlledEnv(AbsEnv):
             self.viewer = rendering.Viewer(500, 500)
             bound = self.LINK_LENGTH_1 + self.LINK_LENGTH_2 + 0.2  # 2.2 for default
             self.viewer.set_bounds(-bound, bound, -bound, bound)
+            # draw target trajectory
+            (l, b), (l, t), (r, t), (r, b) = self.rect.corners
+            self.traj = self.viewer.draw_polygon([(l, b), (l, t), (r, t), (r, b)], filled=False)
+            circ = rendering.make_circle(.05)
+            self.ctransform = rendering.Transform()
+            circ.add_attr(self.ctransform)
+            self.viewer.add_geom(circ)
 
         if s is None: return None
 
@@ -139,23 +220,9 @@ class ArmControlledEnv(AbsEnv):
             circ.set_color(.8, .8, 0)
             circ.add_attr(jtransform)
 
-        pt = self.target
-        pt1 = [self.LINK_LENGTH_1 * cos(pt[0]), self.LINK_LENGTH_1 * sin(pt[0])]
-        pt2 = [p1[0] + self.LINK_LENGTH_2 * cos(pt[0] + pt[1]),
-               p1[1] + self.LINK_LENGTH_2 * sin(pt[0] + pt[1])]
-        xys = np.array([[0, 0], pt1, pt2])  # [:, ::-1]
-        thetas = [pt[0], pt[0] + pt[1]]
-        link_lengths = [self.LINK_LENGTH_1, self.LINK_LENGTH_2]
-        for ((x, y), th, llen) in zip(xys, thetas, link_lengths):
-            l, r, t, b = 0, llen, .1, -.1
-            jtransform = rendering.Transform(rotation=th, translation=(x, y))
-            link = self.viewer.draw_polygon([(l, b), (l, t), (r, t), (r, b)])
-            link.add_attr(jtransform)
-            link._color.vec4 = (0, .8, .8, .2)
-            circ = self.viewer.draw_circle(.1)
-            circ._color.vec4 = (.8, .8, 0, .2)
-            circ.add_attr(jtransform)
+        self.ctransform.set_translation(*self.target)
 
+        self.viewer.add_onetime(self.traj)
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
     def step_batch(self, x, u):
@@ -184,58 +251,70 @@ class ArmControlledEnv(AbsEnv):
 
         return state
 
-    def benchmark_data(self, data={}):
+    def get_benchmark_data(self, data={}):
         if len(data) == 0:
-            data = {'arm2_distance': [],
-                    'velocity_arm2_distance': [],
-                    'acceleration_arm2_distance': [],
-                    'jerk_arm2_distance': []}
+            names = ['θ1', 'θ2', 'Δx', 'Δy']
+            data = {name: [] for name in names}
 
-        arm2_distance = self._get_obs()[1]
-        data['arm2_distance'].append(arm2_distance)
+        names = list(data.keys())
+        for i, name in enumerate(names[:2]):
+            data[name].append(self.state[i])
 
-        if len(data['arm2_distance']) >= 2:
-            data['velocity_arm2_distance'].append(data['arm2_distance'][-1] - data['arm2_distance'][-2])
-
-        if len(data['velocity_arm2_distance']) >= 3:
-            data['acceleration_arm2_distance'].append(data['velocity_arm2_distance'][-1] - data['velocity_arm2_distance'][-2])
-
-        if len(data['acceleration_arm2_distance']) >= 4:
-            data['jerk_arm2_distance'].append(data['acceleration_arm2_distance'][-1] - data['acceleration_arm2_distance'][-2])
+        obs = self._get_obs()
+        data['Δx'].append(obs[-2])
+        data['Δy'].append(obs[-1])
 
         return data
 
+    def do_benchmark(self, data):
+        names = list(data.keys())
+        # convert to numpy
+        for i, name in enumerate(names):
+            data[name] = np.array(data[name])
+
+        return data
 
 def angle_normalize(x):
     return (((x+pi) % (2*pi)) - pi)
 
 
-def wrap(x, m, M):
-    """Wraps ``x`` so m <= x <= M; but unlike ``bound()`` which
-    truncates, ``wrap()`` wraps x around the coordinate system defined by m,M.\n
-    For example, m = -180, M = 180 (degrees), x = 360 --> returns 0.
-    Args:
-        x: a scalar
-        m: minimum possible value in range
-        M: maximum possible value in range
-    Returns:
-        x: a scalar, wrapped
-    """
-    diff = M - m
-    while x > M:
-        x = x - diff
-    while x < m:
-        x = x + diff
-    return x
+
 
 if __name__ == '__main__':
+    from viz import *
+    v = Video()
+    N_ITER = 10
     env = ArmControlledEnv()
     env.seed()
+    net = Net()
 
-    for _ in range(32):
-        env.reset()
-        for _ in range(100):
-            env.render()
-            a = env.action_space.sample()
-            env.step(a)
-    env.close()
+    for txy in env.rect.points:
+        env.target = txy
+        txy = torch.from_numpy(txy).unsqueeze(0).float()
+        for i in range(N_ITER):
+
+            net.prepare_eval()
+            thetas = net(txy)
+
+            xy_ = torch.cat((env.LINK_LENGTH_1 * torch.cos(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.cos(thetas[:, :1] + thetas[:, 1:]),
+                            env.LINK_LENGTH_1 * torch.sin(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.sin(thetas[:, :1] + thetas[:, 1:])), dim=1)
+
+            error = ((txy - xy_) ** 2).sum()
+            net.prepare_update()
+            net.update(error)
+            net.prepare_eval()
+            env.state = thetas.detach().numpy().squeeze(0)
+
+            # if error.item() < .001:
+            #     print(i)
+            #     break
+        v.add(env.render(mode='rgb_array'))
+    v.save("test.gif")
+
+    # for _ in range(32):
+    #     env.reset()
+    #     for _ in range(100):
+    #         env.render()
+    #         a = env.action_space.sample() * 0
+    #         env.step(a)
+    # env.close()
