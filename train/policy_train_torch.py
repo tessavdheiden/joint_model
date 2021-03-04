@@ -33,14 +33,14 @@ MEMORY_CAPACITY = 5000
 BATCH_SIZE = 16
 VAR_MIN = 0.1
 
-env = ArmControlledEnv()
+env = ArmFollowRectangleEnv()
 STATE_DIM = env.observation_space.shape[0]
 H_DIM = 200
 ACTION_DIM = env.action_dim
 ACTION_SCALE = env.u_high
 ACTION_BOUND = env.u_high
 RENDER = True
-LOAD = False
+LOAD = True
 EMPOWERMENT = False
 
 
@@ -126,10 +126,6 @@ class Agent():
         action = self.eval_anet(state)
         return action
 
-    def save_param(self):
-        torch.save(self.eval_anet.state_dict(), '../param/ddpg_anet_params.pkl')
-        torch.save(self.eval_cnet.state_dict(), '../param/ddpg_cnet_params.pkl')
-
     def store_transition(self, transition):
         self.memory.update(transition)
 
@@ -189,10 +185,22 @@ class Agent():
             network = self.cast(network)
             network.eval()
 
+    def save_param(self, path='param/ddpg.pkl'):
+        save_dict = {'networks': [network.state_dict() for network in self.networks]}
+        torch.save(save_dict, path)
+
+    def load_param(self, path='param/ddpg.pkl'):
+        save_dict = torch.load(path)
+        for network, params in zip(self.networks, save_dict['networks']):
+            network.load_state_dict(params)
+
 agent = Agent()
 
 
 def train():
+    if not os.path.exists('../param'):
+        print('param dir doesnt exit')
+
     var = 2.  # control exploration
     rewards = []
     for ep in range(MAX_EPISODES):
@@ -232,14 +240,36 @@ def train():
                       )
                 break
         rewards.append(ep_reward)
-    if not os.path.exists('../param'):
-        print('param dir doesnt exit')
+
     agent.save_param()
     plt.scatter(np.arange(len(rewards)), rewards)
     plt.savefig('img/reward_policy.png')
 
+
 def eval():
-    pass
+    agent.load_param()
+    s = env.reset()
+
+    b = BenchmarkPlot()
+    v = Video()
+
+    data = env.get_benchmark_data()
+
+    for t in range(MAX_EP_STEPS):
+        if RENDER:
+            v.add(env.render(mode='rgb_array'))
+        a = agent.select_action(s).detach().numpy().squeeze(0)
+
+        s_, r, done, _ = env.step(a)
+        data = env.get_benchmark_data(data)
+        s = s_
+
+    env.do_benchmark(data)
+    b.add(data)
+    b.plot("img/derivatives.png")
+    env.close()
+
+    v.save('img/video.gif')
 
 if __name__ == '__main__':
     if LOAD:

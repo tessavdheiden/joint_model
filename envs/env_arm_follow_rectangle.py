@@ -1,29 +1,25 @@
-from itertools import product
 import numpy as np
 from gym import spaces
 from numpy import sin, cos, pi
 import torch
+import torch.nn as nn
+import torch.optim as optim
 
 
 from envs.env_abs import AbsEnv
 
 
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 class Rectange(object):
-    def __init__(self, top_left, w, h, n):
-        l = top_left[0]
-        t = top_left[1]
+    def __init__(self, center, w, h, n):
+        l = center[0] - w/2
+        t = center[1] + h/2
         b = t - h
         r = l + w
-        top = np.stack(
-            [np.linspace(l, r, n // 4 + 1),
-             np.full(n // 4 + 1, t)],
-            axis=1
-        )[:-1]
-        left = np.stack(
-            [np.full(n // 4 + 1, l),
-             np.linspace(t, b, n // 4 + 1)],
-            axis=1
-        )[:-1]
+        top = np.stack([np.linspace(l, r, n // 4 + 1), np.full(n // 4 + 1, t)], axis=1)[:-1]
+        left = np.stack([np.full(n // 4 + 1, l), np.linspace(t, b, n // 4 + 1)], axis=1)[:-1]
         right = left.copy()
         right[:, 0] += w
         bottom = top.copy()
@@ -37,14 +33,6 @@ class Rectange(object):
         p = self.points[self.it]
         self.it = (self.it + 1) % len(self.points)
         return p
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-
-
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class Net(nn.Module):
@@ -90,7 +78,7 @@ class Net(nn.Module):
             network.eval()
 
 
-class ArmControlledEnv(AbsEnv):
+class ArmFollowRectangleEnv(AbsEnv):
     metadata = {
         'render.modes': ['human', 'rgb_array'],
         'video.frames_per_second': 30
@@ -125,8 +113,7 @@ class ArmControlledEnv(AbsEnv):
         self.name = 'Arm'
         self.state = np.zeros(2)
         self.target_location = np.zeros(2)
-        self.left_up_corner = (-1, 1.5)
-        self.rect = Rectange(self.left_up_corner, 2, 3, 1000)
+        self.rect = Rectange((0, 0), 2, 3, 1000)
 
         self.viewer = None
 
@@ -225,32 +212,6 @@ class ArmControlledEnv(AbsEnv):
         self.viewer.add_onetime(self.traj)
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
-    def step_batch(self, x, u):
-        u = torch.max(torch.min(u, self.u_high_torch), self.u_low_torch)
-
-        if OBS == "angles":
-            theta1 = x[:, 0:1]
-            theta2 = x[:, 1:2]
-        elif OBS == "sin/cos":
-            # -π <= atan2() <= π
-            c1, s1, c2, s2 = x[:, 0:1], x[:, 1:2], x[:, 2:3], x[:, 3:4]
-            theta1 = torch.atan2(s1, c1)
-            theta2 = torch.atan2(s2, c2)
-
-        if MODE == "clamp":
-            theta1 = torch.clamp(theta1 + u[:, :1] * self.dt, min=-pi, max=pi)
-            theta2 = torch.clamp(theta2 + u[:, 1:] * self.dt, min=-pi, max=pi)
-        elif MODE == "wrap":
-            theta1 = angle_normalize(theta1 + u[:, :1] * self.dt)
-            theta2 = angle_normalize(theta2 + u[:, 1:] * self.dt)
-
-        if OBS == "angles":
-            state = torch.cat((theta1, theta2), dim=1)
-        elif OBS == "sin/cos":
-            state = torch.cat((torch.cos(theta1), torch.sin(theta1), torch.cos(theta2), torch.sin(theta2)), dim=1)
-
-        return state
-
     def get_benchmark_data(self, data={}):
         if len(data) == 0:
             names = ['θ1', 'θ2', 'Δx', 'Δy']
@@ -278,43 +239,50 @@ def angle_normalize(x):
     return (((x+pi) % (2*pi)) - pi)
 
 
-
-
-if __name__ == '__main__':
-    from viz import *
-    v = Video()
+def solve_trajectory():
     N_ITER = 10
-    env = ArmControlledEnv()
-    env.seed()
     net = Net()
+    traj = np.zeros((len(env.rect.points), 2))
 
-    for txy in env.rect.points:
+    for j, txy in enumerate(env.rect.points):
         env.target = txy
         txy = torch.from_numpy(txy).unsqueeze(0).float()
         for i in range(N_ITER):
-
             net.prepare_eval()
             thetas = net(txy)
 
-            xy_ = torch.cat((env.LINK_LENGTH_1 * torch.cos(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.cos(thetas[:, :1] + thetas[:, 1:]),
-                            env.LINK_LENGTH_1 * torch.sin(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.sin(thetas[:, :1] + thetas[:, 1:])), dim=1)
+            xy_ = torch.cat((env.LINK_LENGTH_1 * torch.cos(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.cos(
+                thetas[:, :1] + thetas[:, 1:]),
+                             env.LINK_LENGTH_1 * torch.sin(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.sin(
+                                 thetas[:, :1] + thetas[:, 1:])), dim=1)
 
             error = ((txy - xy_) ** 2).sum()
             net.prepare_update()
             net.update(error)
             net.prepare_eval()
-            env.state = thetas.detach().numpy().squeeze(0)
 
-            # if error.item() < .001:
-            #     print(i)
-            #     break
+        traj[j] = thetas.detach().numpy().squeeze(0)
+    return traj
+
+
+if __name__ == '__main__':
+    from viz import *
+    v = Video()
+
+    env = ArmFollowRectangleEnv()
+    env.seed()
+
+    traj = solve_trajectory()
+    with open('traj.npy', 'wb') as f:
+        np.save(f, traj)
+
+    # rendering
+    with open('traj.npy', 'rb') as f:
+        traj = np.load(f)
+
+    for j, txy in enumerate(env.rect.points):
+        env.target = txy
+        env.state = traj[j]
         v.add(env.render(mode='rgb_array'))
     v.save("test.gif")
 
-    # for _ in range(32):
-    #     env.reset()
-    #     for _ in range(100):
-    #         env.render()
-    #         a = env.action_space.sample() * 0
-    #         env.step(a)
-    # env.close()
