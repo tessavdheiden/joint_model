@@ -7,7 +7,7 @@ import torch.optim as optim
 
 
 from envs.env_abs import AbsEnv
-
+from envs.misc import angle_normalize
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -234,10 +234,6 @@ class ArmFollowRectangleEnv(AbsEnv):
             data[name] = np.array(data[name])
 
         return data
-
-def angle_normalize(x):
-    return (((x+pi) % (2*pi)) - pi)
-
 
 def solve_trajectory():
     N_ITER = 10
