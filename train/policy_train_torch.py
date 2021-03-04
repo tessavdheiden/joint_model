@@ -26,6 +26,8 @@ MAX_EP_STEPS = 100
 LR_A = 1e-4  # learning rate for actor
 LR_C = 1e-4  # learning rate for critic
 GAMMA = .9
+REPLACE_ITER_A = 1100
+REPLACE_ITER_C = 1000
 
 MEMORY_CAPACITY = 5000
 BATCH_SIZE = 16
@@ -42,18 +44,27 @@ LOAD = False
 EMPOWERMENT = False
 
 
+def init_weights(m):
+    if type(m) == nn.Linear:
+        torch.nn.init.xavier_uniform_(m.weight)
+        m.bias.data.fill_(0.01)
+
+
 class ActorNet(nn.Module):
     def __init__(self):
         super(ActorNet, self).__init__()
         self.fc = nn.Sequential(nn.Linear(STATE_DIM, H_DIM),
-                                nn.ReLU(), nn.BatchNorm1d(H_DIM),
+                                nn.ReLU6(),
                                 nn.Linear(H_DIM, H_DIM),
-                                nn.ReLU(), nn.BatchNorm1d(H_DIM),
+                                nn.ReLU6(),
                                 nn.Linear(H_DIM, H_DIM))
         self.mu_head = nn.Linear(H_DIM, ACTION_DIM)
 
+        self.fc.apply(init_weights)
+        self.mu_head.apply(init_weights)
+
     def forward(self, s):
-        x = self.fc(s)
+        x = F.relu(self.fc(s))
         u = ACTION_SCALE[0] * F.tanh(self.mu_head(x))
         return u
 
@@ -62,14 +73,16 @@ class CriticNet(nn.Module):
     def __init__(self):
         super(CriticNet, self).__init__()
         self.fc = nn.Sequential(nn.Linear(STATE_DIM + ACTION_DIM, H_DIM),
-                                nn.ReLU(), nn.BatchNorm1d(H_DIM),
+                                nn.ReLU6(),
                                 nn.Linear(H_DIM, H_DIM),
-                                nn.ReLU(), nn.BatchNorm1d(H_DIM),
+                                nn.ReLU6(),
                                 nn.Linear(H_DIM, H_DIM))
         self.v_head = nn.Linear(H_DIM, 1)
+        self.fc.apply(init_weights)
+        self.v_head.apply(init_weights)
 
     def forward(self, sa):
-        x = self.fc(sa)
+        x = F.relu(self.fc(sa))
         state_value = self.v_head(x)
         return state_value
 
@@ -137,19 +150,19 @@ class Agent():
         self.optimizer_c.zero_grad()
         c_loss = F.smooth_l1_loss(q_eval, q_target)
         c_loss.backward()
-        nn.utils.clip_grad_norm_(self.eval_cnet.parameters(), self.max_grad_norm)
+        #nn.utils.clip_grad_norm_(self.eval_cnet.parameters(), self.max_grad_norm)
         self.optimizer_c.step()
 
         # update actor net
         self.optimizer_a.zero_grad()
         a_loss = -self.eval_cnet(torch.cat((s, self.eval_anet(s)), dim=1)).mean()
         a_loss.backward()
-        nn.utils.clip_grad_norm_(self.eval_anet.parameters(), self.max_grad_norm)
+        #nn.utils.clip_grad_norm_(self.eval_anet.parameters(), self.max_grad_norm)
         self.optimizer_a.step()
 
-        if self.training_step % 200 == 0:
+        if self.training_step % REPLACE_ITER_C == 0:
             self.target_cnet.load_state_dict(self.eval_cnet.state_dict())
-        if self.training_step % 201 == 0:
+        if self.training_step % REPLACE_ITER_A == 0:
             self.target_anet.load_state_dict(self.eval_anet.state_dict())
 
         self.var = max(self.var * 0.999, 0.01)
