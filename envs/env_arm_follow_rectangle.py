@@ -235,31 +235,64 @@ class ArmFollowRectangleEnv(AbsEnv):
 
         return data
 
-def solve_trajectory():
+
+def solve_trajectory_with_nn():
     N_ITER = 10
     net = Net()
     traj = np.zeros((len(env.rect.points), 2))
 
-    for j, txy in enumerate(env.rect.points):
-        env.target = txy
-        txy = torch.from_numpy(txy).unsqueeze(0).float()
+    for j, target_xy in enumerate(env.rect.points):
+        env.target = target_xy
+        target_xy = torch.from_numpy(target_xy).unsqueeze(0).float()
         for i in range(N_ITER):
             net.prepare_eval()
-            thetas = net(txy)
+            thetas = net(target_xy)
 
             xy_ = torch.cat((env.LINK_LENGTH_1 * torch.cos(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.cos(
                 thetas[:, :1] + thetas[:, 1:]),
                              env.LINK_LENGTH_1 * torch.sin(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.sin(
                                  thetas[:, :1] + thetas[:, 1:])), dim=1)
 
-            error = ((txy - xy_) ** 2).sum()
+            error = ((target_xy - xy_) ** 2).sum()
             net.prepare_update()
             net.update(error)
             net.prepare_eval()
 
         traj[j] = thetas.detach().numpy().squeeze(0)
+        env.state = traj[j]
+        env.render()
     return traj
 
+
+def solve_trajectory():
+    N_ITER = 10000
+    traj = np.zeros((len(env.rect.points), 2))
+    learning_rate = .001
+
+    for j, target_xy in enumerate(env.rect.points):
+        thetas = torch.autograd.Variable(torch.zeros(1, 2), requires_grad=True)
+        if j > 0:
+            thetas.data = torch.from_numpy(traj[j-1]).unsqueeze(0)
+        else:
+            thetas.data = torch.tensor([pi, -pi/2]).unsqueeze(0)
+        env.target = target_xy
+        target_xy = torch.from_numpy(target_xy).unsqueeze(0).float()
+        loss = 1
+        while loss > 0.001:
+            xy_ = torch.cat((env.LINK_LENGTH_1 * torch.cos(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.cos(thetas[:, :1] + thetas[:, 1:]),
+                             env.LINK_LENGTH_1 * torch.sin(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.sin(thetas[:, :1] + thetas[:, 1:])), dim=1)
+
+            error = ((target_xy - xy_) ** 2)
+            loss = error.sum()
+            loss.backward()
+            thetas.data -= learning_rate * thetas.grad.data
+            thetas.grad.data.zero_()
+
+        env.state = thetas.detach().numpy().squeeze(0)
+        env.render()
+        traj[j] = thetas.detach().numpy().squeeze(0)
+
+    return traj
 
 if __name__ == '__main__':
     from viz import *
