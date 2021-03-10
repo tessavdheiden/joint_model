@@ -2,6 +2,7 @@ import numpy as np
 from numpy import pi, cos, sin
 from gym import spaces
 import os
+import torch
 
 from envs.env_abs import AbsEnv
 from envs.misc import angle_normalize
@@ -12,12 +13,18 @@ class Trajectory(object):
         assert os.path.exists('traj.npy')
         with open('traj.npy', 'rb') as f:
             traj = np.load(f)
-        self.points = traj[10:] # first
+        self.states = np.zeros((len(traj), 4))
+        self.states[:, :2] = traj
+        self.states[1:, 2:4] = np.diff(traj, axis=0)
+        self.N = len(self.states)
         self.it = 0
 
     def get_next(self, n=1):
-        res = self.points[self.it:self.it+n]
-        self.it = (self.it + 1) % len(self.points)
+        if self.it + n <= self.N:
+            res = self.states[self.it:self.it + n]
+        else:
+            res = np.vstack((self.states[self.it:], self.states[:n - (self.N - self.it)]))
+        self.it = (self.it + n) % len(self.states)
         return res
 
 
@@ -35,12 +42,13 @@ class ControlledArmEnv(AbsEnv):
     MAX_VEL = 9 * pi
     GAIN_P = 8.
     GAIN_D = 1.
-
-    u_low = np.array([0., 0.])
-    u_high = np.array([1., 1.])
+    n = 20
+    action_dim = 4 * n
+    u_high = np.ones(action_dim) * .0001
+    u_low = -u_high
     action_space = spaces.Box(
         low=u_low,
-        high=u_high, shape=(2,),
+        high=u_high, shape=(action_dim,),
         dtype=np.float32
     )
     s_min = -1
@@ -51,50 +59,80 @@ class ControlledArmEnv(AbsEnv):
         dtype=np.float32
     )
 
-    action_dim = 2
-
     point_l = .5
     grab_counter = 0
 
     def __init__(self):
         self.name = 'ControlledArm'
         self.state = np.zeros(4)
+        self.states = np.zeros((self.n, 4))
         self.p = np.ones(2) * self.GAIN_P
         self.d = np.ones(2) * self.GAIN_D
         self.traj = Trajectory()
-        self.n = 20
-
+        self.state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'barθ1r', 'barθ2r']
         self.viewer = None
 
     def step(self, a):
         dt = self.dt
 
-        delta_p = angle_normalize(self.target - self.state[:2])
-        delta_v = -self.state[2:]
+        self.reference = self.traj.get_next(self.n)
+        a = a.reshape(self.n, 4)
 
-        u = self.p * delta_p + self.d * delta_v
+        self.states = np.zeros((self.n, 4))
+        for t in range(self.n):
+            self.target = self.reference[t] + a[t]
 
-        self.state[2:] += u * dt
-        self.state[:2] += self.state[2:] * dt
+            delta_p = angle_normalize(self.target[:2] - self.state[:2])
+            delta_v = self.target[2:4] - self.state[2:4]
+
+            alpha = self.p * delta_p + self.d * delta_v
+
+            self.state[2:4] += alpha * dt
+            self.state[:2] += self.state[2:4] * dt
+            self.state[:2] = angle_normalize(self.state[:2])
+            self.states[t, :2] = self.state[:2]
+            self.states[t, 2:4] = self.state[2:4]
 
         obs = self._get_obs()
 
-        self.points = self.traj.get_next(self.n)
-        self.target = self.points[0]
         return obs, None, [], {}
 
     def _get_obs(self):
-        delta = self.target - self.state[:2]
-        return np.hstack([cos(self.state[0]), sin(self.state[0]),
-                          cos(self.state[1]), sin(self.state[1]),
-                          self.state[2], self.state[3],
-                          delta[0], delta[1]])
+        l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
+        obs = np.zeros((self.n, 6))
+        for t in range(self.n):
+            t1, t2 = self.states[t, 0], self.states[t, 1]
+            x1, y1 = l1*cos(t1), l1*sin(t1)
+            x2, y2 = x1 + l2*cos(t1+t2), y1 + l2*sin(t1+t2)
+            obs[t] = np.hstack([x1, y1, x2, y2, self.states[t, 2], self.states[t, 3]])
+        return np.hstack((np.ravel(obs), np.ravel(self.reference)))
+
+    def step_batch(self, x, u):
+        th = torch.cat(torch.atan2(x[:, 1:2], x[:, 0:1]), torch.atan2(x[:, 3:4], x[:, 2:3]), dim=1)
+        thdot = x[:, 4:6]
+
+        delta_p = angle_normalize(u[:, :2] - th)
+        delta_v = u[:, 2:4] - thdot
+
+        alpha = self.p * delta_p + self.d * delta_v
+
+        newthdot = thdot + alpha * self.dt
+        newth = th + newthdot * self.dt
+        newth = angle_normalize(newth)
+
+        reference = x[:, 6:]
+        return self._get_obs_from_state(newth, newthdot, reference)
+
+    def _get_obs_from_state(self, ang, vel, reference):
+        return torch.cat((torch.cos(ang[:, 0:1]), torch.sin(ang[:, 0:1]),
+                          torch.cos(ang[:, 1:2]), torch.sin(ang[:, 1:2]),
+                          vel[:, 0:1], vel[:, 1:2],
+                          reference[:, :]), dim=1)
 
     def reset(self):
-        self.points = self.traj.get_next(self.n)
-        self.target = self.points[0]
-        self.state[:2] = self.target
-        self.state[2:] = np.zeros(2)
+        self.reference = None#self.traj.states[:self.n]
+        self.state[:4] = self.traj.states[0]
+        self.states = np.zeros((self.n, 4))
 
     def draw(self, s, alpha=1.):
         from gym.envs.classic_control import rendering
@@ -136,7 +174,7 @@ class ControlledArmEnv(AbsEnv):
         self.draw(self.state[:2])
         self.draw(self.target, .2)
 
-        for i, p in enumerate(self.points):
+        for i, p in enumerate(self.reference):
             s = p
             p1 = [self.LINK_LENGTH_1 * cos(s[0]), self.LINK_LENGTH_1 * sin(s[0])]
 
@@ -148,14 +186,13 @@ class ControlledArmEnv(AbsEnv):
 
     def get_benchmark_data(self, data={}):
         if len(data) == 0:
-            names = ['dotθ1', 'dotθ2', 'Δx', 'Δy' ,'ddotθ1', 'ddotθ2']
+            names = ['θ1', 'θ2', 'dotθ1', 'dotθ2' ,'ddotθ1', 'ddotθ2']
             data = {name: [] for name in names}
 
-        obs = self._get_obs()
-        data['dotθ1'].append(obs[4])
-        data['dotθ2'].append(obs[5])
-        data['Δx'].append(obs[-2])
-        data['Δy'].append(obs[-1])
+        data['θ1'].append(self.state[0])
+        data['θ2'].append(self.state[1])
+        data['dotθ1'].append(self.state[2])
+        data['dotθ2'].append(self.state[3])
 
         return data
 
@@ -178,8 +215,9 @@ def make_video():
     env.seed()
     env.reset()
     for _ in range(1000):
+        a = env.action_space.sample()
+        env.step(a)
         v.add(env.render(mode='rgb_array'))
-        env.step(None)
     v.save(f'../img/p={env.p}_d={env.d}.gif')
     env.close()
 
@@ -191,9 +229,13 @@ def make_plot():
     env.seed()
     env.reset()
     data = env.get_benchmark_data()
-    for _ in range(1000):
-        env.step(None)
-        data = env.get_benchmark_data(data)
+    for _ in range(5):
+        a = env.action_space.sample()
+        env.step(a)
+        for t in range(env.states.shape[0]):
+            env.state = env.states[t]
+            data = env.get_benchmark_data(data)
+            env.render()
     env.do_benchmark(data)
     b.add(data)
     b.plot("../img/derivatives.png")
@@ -201,4 +243,4 @@ def make_plot():
 
 
 if __name__ == '__main__':
-    make_video()
+    make_plot()

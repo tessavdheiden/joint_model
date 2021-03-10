@@ -33,7 +33,7 @@ MEMORY_CAPACITY = 5000
 BATCH_SIZE = 16
 VAR_MIN = 0.1
 
-env = ArmFollowRectangleEnv()
+env = ArmFollowShapeEnv()
 STATE_DIM = env.observation_space.shape[0]
 H_DIM = 200
 ACTION_DIM = env.action_dim

@@ -41,7 +41,7 @@ EMPOWERMENT = False
 MODE = ['easy', 'hard']
 n_model = 1
 
-env = ArmFollowRectangleEnv()
+env = ArmFollowShapeEnv()
 STATE_DIM = env.observation_space.shape[0]
 ACTION_DIM = env.action_dim
 ACTION_BOUND = env.u_high

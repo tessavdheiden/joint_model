@@ -12,79 +12,58 @@ from envs.misc import angle_normalize
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-class Rectange(object):
-    def __init__(self, center, w, h, n):
-        l = center[0] - w/2
-        t = center[1] + h/2
-        b = t - h
-        r = l + w
-        top = np.stack([np.linspace(l, r, n // 4 + 1), np.full(n // 4 + 1, t)], axis=1)[:-1]
-        left = np.stack([np.full(n // 4 + 1, l), np.linspace(t, b, n // 4 + 1)], axis=1)[:-1]
-        right = left.copy()
-        right[:, 0] += w
-        bottom = top.copy()
-        bottom[:, 1] -= h
-        self.points = np.concatenate([top, right, bottom[::-1], left[::-1]])
+class Shape(object):
+    def __init__(self):
+        raise NotImplementedError
 
-        self.corners = (l, b), (l, t), (r, t), (r, b)
-        self.it = 0
+    @property
+    def points(self):
+        raise NotImplementedError
 
     def get_next(self):
         p = self.points[self.it]
         self.it = (self.it + 1) % len(self.points)
         return p
 
+class Rectangle(Shape):
+    def __init__(self, center, w, h, N):
+        l = center[0] - w/2
+        t = center[1] + h/2
+        b = t - h
+        r = l + w
+        n = N // h * w
+        assert n == (N / h * w)
+        m = N // w * h
+        top = np.stack([np.linspace(l, r, n // 2 + 1), np.full(n // 2 + 1, t)], axis=1)[:-1]
+        left = np.stack([np.full(m // 2 + 1, l), np.linspace(t, b, m // 2 + 1)], axis=1)[:-1]
+        right = left.copy()
+        right[:, 0] += w
+        bottom = top.copy()
+        bottom[:, 1] -= h
 
-class Net(nn.Module):
-    def __init__(self):
-        super(Net, self).__init__()
-        STATE_DIM = 2
-        H_DIM = 100
-
-        self.fc = nn.Sequential(nn.Linear(STATE_DIM, H_DIM),
-                                nn.ReLU(), nn.BatchNorm1d(H_DIM),
-                                nn.Linear(H_DIM, H_DIM),
-                                nn.ReLU(), nn.BatchNorm1d(H_DIM),
-                                nn.Linear(H_DIM, STATE_DIM))
-
-        self.optimizer = optim.RMSprop(self.fc.parameters(), lr=.0001)
-
-    def forward(self, state):
-        return self.fc(state)
-
-    def update(self, error):
-        self.optimizer.zero_grad()
-        error.backward()
-        self.optimizer.step()
+        self.top, self.left, self.right, self.bottom = top, left[::-1], right, bottom[::-1]
+        self.it = 0
 
     @property
-    def networks(self):
-        return [self.fc]
+    def points(self):
+        return np.concatenate([self.top, self.right, self.bottom, self.left])
 
-    def prepare_update(self):
-        if DEVICE == 'cuda':
-            self.cast = lambda x: x.cuda()
-        else:
-            self.cast = lambda x: x.cpu()
+class Circle(Shape):
+    def __init__(self, center, w, h, N):
+        self.circle = np.array([cos(np.linspace(-pi, pi, N)), sin(np.linspace(-pi, pi, N))]).transpose()[::-1]
 
-        for network in self.networks:
-            network = self.cast(network)
-            network.train()
-
-    def prepare_eval(self):
-        self.cast = lambda x: x.cpu()
-        for network in self.networks:
-            network = self.cast(network)
-            network.eval()
+    @property
+    def points(self):
+        return self.circle
 
 
-class ArmFollowRectangleEnv(AbsEnv):
+class ArmFollowShapeEnv(AbsEnv):
     metadata = {
         'render.modes': ['human', 'rgb_array'],
         'video.frames_per_second': 30
     }
 
-    dt = .2
+    dt = .1
 
     LINK_LENGTH_1 = 1
     LINK_LENGTH_2 = 1
@@ -113,7 +92,7 @@ class ArmFollowRectangleEnv(AbsEnv):
         self.name = 'Arm'
         self.state = np.zeros(2)
         self.target_location = np.zeros(2)
-        self.rect = Rectange((0, 0), 2, 3, 1000)
+        self.shape = Rectangle((0, 0), 2, 3, 600)
 
         self.viewer = None
 
@@ -121,7 +100,7 @@ class ArmFollowRectangleEnv(AbsEnv):
         self.u_high_torch = torch.from_numpy(self.u_high).float()
 
     def step(self, u):
-        self.target = self.rect.get_next()
+        self.target = self.shape.get_next()
         u = np.clip(u, self.u_low, self.u_high)
 
         self.state += u * self.dt
@@ -134,7 +113,7 @@ class ArmFollowRectangleEnv(AbsEnv):
         self.state = np.array([0, -pi])
 
     def _reset_target(self):
-        self.target = self.rect.get_next()
+        self.target = self.shape.get_next()
 
     def reset(self):
         self.get_point = False
@@ -179,8 +158,7 @@ class ArmFollowRectangleEnv(AbsEnv):
             bound = self.LINK_LENGTH_1 + self.LINK_LENGTH_2 + 0.2  # 2.2 for default
             self.viewer.set_bounds(-bound, bound, -bound, bound)
             # draw target trajectory
-            (l, b), (l, t), (r, t), (r, b) = self.rect.corners
-            self.traj = self.viewer.draw_polygon([(l, b), (l, t), (r, t), (r, b)], filled=False)
+            self.traj = self.viewer.draw_polyline(self.shape.points, filled=False)
             circ = rendering.make_circle(.05)
             self.ctransform = rendering.Transform()
             circ.add_attr(self.ctransform)
@@ -236,43 +214,14 @@ class ArmFollowRectangleEnv(AbsEnv):
         return data
 
 
-def solve_trajectory_with_nn():
-    N_ITER = 10
-    net = Net()
-    traj = np.zeros((len(env.rect.points), 2))
-
-    for j, target_xy in enumerate(env.rect.points):
-        env.target = target_xy
-        target_xy = torch.from_numpy(target_xy).unsqueeze(0).float()
-        for i in range(N_ITER):
-            net.prepare_eval()
-            thetas = net(target_xy)
-
-            xy_ = torch.cat((env.LINK_LENGTH_1 * torch.cos(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.cos(
-                thetas[:, :1] + thetas[:, 1:]),
-                             env.LINK_LENGTH_1 * torch.sin(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.sin(
-                                 thetas[:, :1] + thetas[:, 1:])), dim=1)
-
-            error = ((target_xy - xy_) ** 2).sum()
-            net.prepare_update()
-            net.update(error)
-            net.prepare_eval()
-
-        traj[j] = thetas.detach().numpy().squeeze(0)
-        env.state = traj[j]
-        env.render()
-    return traj
-
-
 def solve_trajectory():
-    N_ITER = 10000
-    traj = np.zeros((len(env.rect.points), 2))
+    traj = np.zeros((len(env.shape.points), 2))
     learning_rate = .001
 
-    for j, target_xy in enumerate(env.rect.points):
+    for j, target_xy in enumerate(env.shape.points):
         thetas = torch.autograd.Variable(torch.zeros(1, 2), requires_grad=True)
         if j > 0:
-            thetas.data = torch.from_numpy(traj[j-1]).unsqueeze(0)
+            thetas.data = torch.from_numpy(traj[j-1, :2]).unsqueeze(0)
         else:
             thetas.data = torch.tensor([pi, -pi/2]).unsqueeze(0)
         env.target = target_xy
@@ -290,7 +239,7 @@ def solve_trajectory():
 
         env.state = thetas.detach().numpy().squeeze(0)
         env.render()
-        traj[j] = thetas.detach().numpy().squeeze(0)
+        traj[j, :2] = thetas.detach().numpy().squeeze(0)
 
     return traj
 
@@ -298,7 +247,7 @@ if __name__ == '__main__':
     from viz import *
     v = Video()
 
-    env = ArmFollowRectangleEnv()
+    env = ArmFollowShapeEnv()
     env.seed()
 
     traj = solve_trajectory()
@@ -309,7 +258,7 @@ if __name__ == '__main__':
     with open('traj.npy', 'rb') as f:
         traj = np.load(f)
 
-    for j, txy in enumerate(env.rect.points):
+    for j, txy in enumerate(env.shape.points):
         env.target = txy
         env.state = traj[j]
         v.add(env.render(mode='rgb_array'))
