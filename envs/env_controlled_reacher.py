@@ -283,6 +283,7 @@ class ReacherControlledEnv(nn.Module, Env):
         return (dtheta1, dtheta2, ddtheta1, ddtheta2, torch.zeros_like(tau1), torch.zeros_like(tau2))
 
     def step_batch(self, x, u, update=False):
+        batch_size = x.shape[0]
         target = x[:, 8:10]
 
         u = torch.clamp(u, -self.MAX_GAIN_CHANGE, self.MAX_GAIN_CHANGE)

@@ -9,3 +9,4 @@ from envs.env_arm_follow_shape import ArmFollowShapeEnv
 from envs.env_tanh2d import Tanh2DEnv
 from envs.env_pendulum import PendulumEnv
 from envs.env_sigmoid import SigmoidEnv
+from envs.env_controlled_arm import ControlledArmEnv

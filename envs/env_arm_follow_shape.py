@@ -31,11 +31,10 @@ class Rectangle(Shape):
         t = center[1] + h/2
         b = t - h
         r = l + w
-        n = N // h * w
-        assert n == (N / h * w)
-        m = N // w * h
-        top = np.stack([np.linspace(l, r, n // 2 + 1), np.full(n // 2 + 1, t)], axis=1)[:-1]
-        left = np.stack([np.full(m // 2 + 1, l), np.linspace(t, b, m // 2 + 1)], axis=1)[:-1]
+        n = int(N / (2*h + 2*w) * w)
+        m = int(N / (2*h + 2*w) * h)
+        top = np.stack([np.linspace(l, r, n + 1), np.full(n + 1, t)], axis=1)[:-1]
+        left = np.stack([np.full(m + 1, l), np.linspace(t, b, m + 1)], axis=1)[:-1]
         right = left.copy()
         right[:, 0] += w
         bottom = top.copy()
@@ -92,7 +91,7 @@ class ArmFollowShapeEnv(AbsEnv):
         self.name = 'Arm'
         self.state = np.zeros(2)
         self.target_location = np.zeros(2)
-        self.shape = Rectangle((0, 0), 2, 3, 600)
+        self.shape = Rectangle((0, 0), 2, 3, 1000)
 
         self.viewer = None
 
@@ -237,8 +236,8 @@ def solve_trajectory():
             thetas.data -= learning_rate * thetas.grad.data
             thetas.grad.data.zero_()
 
-        env.state = thetas.detach().numpy().squeeze(0)
-        env.render()
+        # env.state = thetas.detach().numpy().squeeze(0)
+        # env.render()
         traj[j, :2] = thetas.detach().numpy().squeeze(0)
 
     return traj

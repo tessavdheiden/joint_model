@@ -9,13 +9,19 @@ from envs.misc import angle_normalize
 
 
 class Trajectory(object):
+    observation_space = spaces.Box(
+        low=-1,
+        high=1, shape=(4,),
+        dtype=np.float32
+    )
     def __init__(self):
-        assert os.path.exists('traj.npy')
-        with open('traj.npy', 'rb') as f:
+        pf = os.path.join(os.getcwd(), os.path.dirname(__file__), 'traj.npy')
+        assert os.path.exists(pf)
+        with open(pf, 'rb') as f:
             traj = np.load(f)
         self.states = np.zeros((len(traj), 4))
         self.states[:, :2] = traj
-        self.states[1:, 2:4] = np.diff(traj, axis=0)
+        self.states[:-1, 2:4] = np.diff(traj, axis=0)
         self.N = len(self.states)
         self.it = 0
 
@@ -40,10 +46,13 @@ class ControlledArmEnv(AbsEnv):
     LINK_LENGTH_2 = 1
 
     MAX_VEL = 9 * pi
-    GAIN_P = 8.
+    GAIN_P = 18.
     GAIN_D = 1.
-    n = 20
+    n = 100
     action_dim = 4 * n
+    state_dim = 4
+    m = Trajectory.observation_space.shape[0]
+
     u_high = np.ones(action_dim) * .0001
     u_low = -u_high
     action_space = spaces.Box(
@@ -53,9 +62,11 @@ class ControlledArmEnv(AbsEnv):
     )
     s_min = -1
     s_max = 1
+
+    obs_dim = state_dim + 2  # +2 for cos and sin
     observation_space = spaces.Box(
         low=-s_max,
-        high=s_max, shape=(8,),
+        high=s_max, shape=(n * (obs_dim + m),),
         dtype=np.float32
     )
 
@@ -64,10 +75,12 @@ class ControlledArmEnv(AbsEnv):
 
     def __init__(self):
         self.name = 'ControlledArm'
-        self.state = np.zeros(4)
-        self.states = np.zeros((self.n, 4))
+        self.state = np.zeros(self.state_dim)
+        self.states = np.zeros((self.n, self.state_dim))
         self.p = np.ones(2) * self.GAIN_P
         self.d = np.ones(2) * self.GAIN_D
+        self.ptorch = torch.from_numpy(self.p)
+        self.dtorch = torch.from_numpy(self.d)
         self.traj = Trajectory()
         self.state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'barθ1r', 'barθ2r']
         self.viewer = None
@@ -75,10 +88,8 @@ class ControlledArmEnv(AbsEnv):
     def step(self, a):
         dt = self.dt
 
-        self.reference = self.traj.get_next(self.n)
-        a = a.reshape(self.n, 4)
+        a = a.reshape(self.n, self.m)
 
-        self.states = np.zeros((self.n, 4))
         for t in range(self.n):
             self.target = self.reference[t] + a[t]
 
@@ -94,12 +105,13 @@ class ControlledArmEnv(AbsEnv):
             self.states[t, 2:4] = self.state[2:4]
 
         obs = self._get_obs()
+        self.reference = self.traj.get_next(self.n)
 
         return obs, None, [], {}
 
     def _get_obs(self):
         l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
-        obs = np.zeros((self.n, 6))
+        obs = np.zeros((self.n, self.obs_dim))
         for t in range(self.n):
             t1, t2 = self.states[t, 0], self.states[t, 1]
             x1, y1 = l1*cos(t1), l1*sin(t1)
@@ -108,31 +120,45 @@ class ControlledArmEnv(AbsEnv):
         return np.hstack((np.ravel(obs), np.ravel(self.reference)))
 
     def step_batch(self, x, u):
-        th = torch.cat(torch.atan2(x[:, 1:2], x[:, 0:1]), torch.atan2(x[:, 3:4], x[:, 2:3]), dim=1)
-        thdot = x[:, 4:6]
+        batch_size = x.shape[0]
+        reference = x[:, -self.n * self.m:].view(batch_size, self.n, -1)  # end of array contains reference
+        x = x[:, :-self.n * self.m].view(batch_size, self.n, -1)     # everything else
+        actions = u.view(batch_size, self.n, -1)
+        actions = torch.clamp(actions, -.01, .01)
 
-        delta_p = angle_normalize(u[:, :2] - th)
-        delta_v = u[:, 2:4] - thdot
+        newx = torch.zeros_like(x)
+        for t in range(self.n):
+            target = reference[:, t] + actions[:, t]
+            obs = x[:, t]
 
-        alpha = self.p * delta_p + self.d * delta_v
+            th = torch.cat((torch.atan2(obs[:, 1:2], obs[:, 0:1]), torch.atan2(obs[:, 3:4], obs[:, 2:3])), dim=1)
+            thdot = obs[:, 4:6]
 
-        newthdot = thdot + alpha * self.dt
-        newth = th + newthdot * self.dt
-        newth = angle_normalize(newth)
+            delta_p = angle_normalize(target[:, :2] - th)
+            delta_v = target[:, 2:4] - thdot
 
-        reference = x[:, 6:]
-        return self._get_obs_from_state(newth, newthdot, reference)
+            alpha = self.ptorch * delta_p + self.dtorch * delta_v
 
-    def _get_obs_from_state(self, ang, vel, reference):
+            newthdot = thdot + alpha * self.dt
+            newth = th + newthdot * self.dt
+            newth = angle_normalize(newth)
+            nobs = self._get_obs_from_state(newth, newthdot)
+            newx[:, t] = nobs
+        newx = newx.view(batch_size, -1)
+        reference = reference.view(batch_size, -1)
+        return torch.cat((newx, reference), dim=1)
+
+    def _get_obs_from_state(self, ang, vel):
         return torch.cat((torch.cos(ang[:, 0:1]), torch.sin(ang[:, 0:1]),
                           torch.cos(ang[:, 1:2]), torch.sin(ang[:, 1:2]),
-                          vel[:, 0:1], vel[:, 1:2],
-                          reference[:, :]), dim=1)
+                          vel[:, 0:1], vel[:, 1:2]), dim=1)
 
     def reset(self):
-        self.reference = None#self.traj.states[:self.n]
-        self.state[:4] = self.traj.states[0]
-        self.states = np.zeros((self.n, 4))
+        self.reference = self.traj.get_next(self.n)
+        self.states = self.reference
+        self.state = self.states[0]
+        self.target = self.reference[0]
+        return self._get_obs()
 
     def draw(self, s, alpha=1.):
         from gym.envs.classic_control import rendering
@@ -174,7 +200,7 @@ class ControlledArmEnv(AbsEnv):
         self.draw(self.state[:2])
         self.draw(self.target, .2)
 
-        for i, p in enumerate(self.reference):
+        for i, p in enumerate(self.traj.states[:self.n, :2]):
             s = p
             p1 = [self.LINK_LENGTH_1 * cos(s[0]), self.LINK_LENGTH_1 * sin(s[0])]
 
@@ -207,6 +233,23 @@ class ControlledArmEnv(AbsEnv):
 
         return data
 
+    def get_state_from_obs(self, obs):
+        batch_size = obs.shape[0]
+        reference = obs[:, -self.n * self.m:].view(batch_size, self.n, -1)  # end of array contains reference
+        # obs = obs[:, :-self.n * self.m].view(batch_size, self.n, -1)  # everything else
+        reference_xy = torch.zeros((batch_size, self.n, 2))
+        for t in range(self.n):
+            reference_th = torch.cat((torch.atan2(reference[:, t, 1:2], reference[:, t, 0:1]), torch.atan2(reference[:, t, 3:4], reference[:, t, 2:3])), dim=1)
+            th1 = reference_th[:, 0:1]
+            th2 = reference_th[:, 1:2]
+            x1 = self.LINK_LENGTH_1 * torch.cos(th1)
+            y1 = self.LINK_LENGTH_1 * torch.sin(th1)
+            x2 = x1 + self.LINK_LENGTH_2 * torch.cos(th1 + th2)
+            y2 = y1 + self.LINK_LENGTH_2 * torch.sin(th1 + th2)
+            reference_xy[:, t] = torch.cat((x2, y2), dim=1)
+
+        return reference_xy.view(batch_size, self.n, 2)
+
 
 def make_video():
     from viz.video import Video
@@ -229,10 +272,11 @@ def make_plot():
     env.seed()
     env.reset()
     data = env.get_benchmark_data()
-    for _ in range(5):
+    env.render()
+    for _ in range(10):
         a = env.action_space.sample()
         env.step(a)
-        for t in range(env.states.shape[0]):
+        for t in range(env.n):
             env.state = env.states[t]
             data = env.get_benchmark_data(data)
             env.render()

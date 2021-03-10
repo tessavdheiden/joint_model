@@ -5,9 +5,6 @@ from torch.distributions import Normal
 import torch.optim as optim
 
 
-N_STEP = 100
-
-
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -42,9 +39,10 @@ def filter_q(x, x_):
     return torch.cat((x[:, :8], x_), dim=1)
 
 class Empowerment(nn.Module):
-    def __init__(self, env):
+    def __init__(self, env, n_step):
         super(Empowerment, self).__init__()
         self.h_dim = 128
+        self.n_step = n_step
         self.action_dim = env.action_space.shape[0]
         self.z_dim = env.observation_space.shape[0]
 
@@ -53,7 +51,7 @@ class Empowerment(nn.Module):
             #self.flt_q = lambda x, x_: torch.cat((x[:, :6], x[:, -4:], x_[:, :6]), dim=1)    # except pd at t+1 and Δθ
             self.flt_q = filter_q
             self.ω = Net(2, self.action_dim, self.h_dim)
-            self.q = Net(8 + 6*N_STEP, self.action_dim, self.h_dim)
+            self.q = Net(8 + 6*self.n_step, self.action_dim, self.h_dim)
             self.auto_regressive = None
             self.opt_q = optim.Adam(self.q.parameters(), lr=1e-4)
             self.forward = self.fwd_step
@@ -87,7 +85,7 @@ class Empowerment(nn.Module):
         all_log_prob_ω = []
         z_ = z
 
-        for t in range(N_STEP):
+        for t in range(self.n_step):
             (μ_ω, σ_ω) = self.ω(z_)
             dist_ω = Normal(μ_ω, σ_ω)
             a_ω = dist_ω.rsample()
@@ -105,7 +103,7 @@ class Empowerment(nn.Module):
         all_log_prob_q.append(dist_1_q.log_prob(all_a_ω[:, 0]).unsqueeze(1))
 
         a_q = dist_1_q.rsample()
-        for t in range(1, N_STEP):
+        for t in range(1, self.n_step):
             (μ_q, σ_q) = self.auto_regressive(torch.cat((z, a_q, z_), dim=1))
             dist_q = Normal(μ_q, σ_q)
             all_log_prob_q.append(dist_q.log_prob(all_a_ω[:, t]).unsqueeze(1))
@@ -125,7 +123,7 @@ class Empowerment(nn.Module):
         a_ω = dist_ω.rsample()
         z_ = self.env.step_batch(z, a_ω.detach())                 # ω-step
         z_lst = [z_]
-        for t in range(1, N_STEP):
+        for t in range(1, self.n):
             z_ = self.env.step_batch(z_, torch.zeros_like(a_ω))   # n state propagations with no PD update
             z_lst.append(z_)
 
