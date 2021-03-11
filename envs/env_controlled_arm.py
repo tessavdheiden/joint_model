@@ -49,7 +49,7 @@ class ControlledArmEnv(AbsEnv):
     MAX_VEL = 9 * pi
     GAIN_P = 8.
     GAIN_D = 1.
-    n = 200
+    n = 20
     action_dim = 4 * n
     state_dim = 4
     m = Trajectory.observation_space.shape[0]
@@ -330,7 +330,7 @@ def make_plot():
     data = env.get_benchmark_data()
     env.render()
 
-    for i in range(11):
+    for i in range(4):
         a = env.action_space.sample() * 0
         env.step(a)
         data = env.get_benchmark_data(data)

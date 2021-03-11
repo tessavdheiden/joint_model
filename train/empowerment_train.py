@@ -28,11 +28,13 @@ def train_empowerment(env, empowerment, replay_memory, args, bayes_filter=None):
         for b in range(replay_memory.n_batches_train):
             batch_dict = replay_memory.next_batch_train()
             x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
+
             if args.use_filter:
                 z = bayes_filter.propagate_solution(x, u)[2]
             else:
                 z = x
-            E[b, :] = empowerment.update(z.reshape(-1, z.shape[2]))
+            z = z.reshape(-1, z.shape[2])   # merge seq length and batch_size
+            E[b, :] = empowerment.update(z)
 
         if i % 10 == 0:
             with torch.no_grad():
@@ -40,9 +42,10 @@ def train_empowerment(env, empowerment, replay_memory, args, bayes_filter=None):
                 x = replay_memory.x
                 x = torch.from_numpy(x.reshape(-1, x.shape[2]))
                 e = empowerment(x)
-                x = cast(env.get_state_from_obs(x))
-                sp.add(xy=x, z=e)
-                sp.plot('img/selection')
+
+                ref_xy = env.get_state_from_obs(x).numpy()
+                sp.add(xy=ref_xy, z=e)
+                sp.plot(f'img/empoerment_selection', env.s_min, env.s_max, env.s_min, env.s_max)
                 # lp.add(xy=pd.DataFrame(x, index=np.arange(len(x)), columns=env.state_names), z=cast(e).reshape(-1, 1))
                 # lp.plot('img/landscape')
                 empowerment.save_params()
@@ -64,7 +67,7 @@ def main():
     parser.add_argument('--seq_length', type=int, default=2, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=32, help='minibatch size')
     parser.add_argument('--num_epochs', type=int, default=2001, help='number of epochs')
-    parser.add_argument('--n_trials', type=int, default=2000,
+    parser.add_argument('--n_trials', type=int, default=1000,
                         help='number of data sequences to collect in each episode')
     parser.add_argument('--trial_len', type=int, default=2, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=1,
