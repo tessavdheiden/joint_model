@@ -13,14 +13,17 @@ class SelectionPlot(object):
         self.xy = xy
         self.z = z
 
-    def plot(self, save_path):
+    def plot(self, save_path, xmin, xmax, ymin, ymax):
         m = np.argmin(self.z)
         M = np.argmax(self.z)
 
         low = self.xy[m, :]
         high = self.xy[M, :]
-        plt.scatter(low[:, 0], low[:, 1], label='min')
-        plt.scatter(high[:, 0], high[:, 1], label='max')
+        plt.scatter(low[:, 0], low[:, 1], label=f'min')
+        plt.scatter(high[:, 0], high[:, 1], label=f'max')
+        for traj in self.xy:
+            plt.scatter(traj[:, 0], traj[:, 1])
+        plt.axis([xmin, xmax, ymin, ymax])
         plt.legend()
         plt.tight_layout()
         plt.savefig(f'{save_path}.png')
