@@ -215,7 +215,7 @@ class ArmFollowShapeEnv(AbsEnv):
 
 def solve_trajectory():
     traj = np.zeros((len(env.shape.points), 2))
-    learning_rate = .001
+    learning_rate = .0005
 
     for j, target_xy in enumerate(env.shape.points):
         thetas = torch.autograd.Variable(torch.zeros(1, 2), requires_grad=True)
@@ -226,7 +226,7 @@ def solve_trajectory():
         env.target = target_xy
         target_xy = torch.from_numpy(target_xy).unsqueeze(0).float()
         loss = 1
-        while loss > 0.001:
+        while loss > 0.0001:
             xy_ = torch.cat((env.LINK_LENGTH_1 * torch.cos(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.cos(thetas[:, :1] + thetas[:, 1:]),
                              env.LINK_LENGTH_1 * torch.sin(thetas[:, :1]) + env.LINK_LENGTH_2 * torch.sin(thetas[:, :1] + thetas[:, 1:])), dim=1)
 
@@ -236,8 +236,8 @@ def solve_trajectory():
             thetas.data -= learning_rate * thetas.grad.data
             thetas.grad.data.zero_()
 
-        # env.state = thetas.detach().numpy().squeeze(0)
-        # env.render()
+        env.state = thetas.detach().numpy().squeeze(0)
+        env.render()
         traj[j, :2] = thetas.detach().numpy().squeeze(0)
 
     return traj

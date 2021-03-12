@@ -49,7 +49,7 @@ class ControlledArmEnv(AbsEnv):
     MAX_VEL = 9 * pi
     GAIN_P = 8.
     GAIN_D = 1.
-    n = 20
+    n = 10
     action_dim = 4 * n
     state_dim = 4
     m = Trajectory.observation_space.shape[0]
@@ -152,9 +152,11 @@ class ControlledArmEnv(AbsEnv):
         return torch.cat((newx, reference), dim=1)
 
     def _get_obs_from_state(self, ang, vel):
-        return torch.cat((torch.cos(ang[:, 0:1]), torch.sin(ang[:, 0:1]),
-                          torch.cos(ang[:, 1:2]), torch.sin(ang[:, 1:2]),
-                          vel[:, 0:1], vel[:, 1:2]), dim=1)
+        l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
+        t1, t2 = ang[:, 0:1], ang[:, 1:2]
+        x1, y1 = torch.cos(t1), torch.sin(t1)
+        x2, y2 = x1 + torch.cos(t1 + t2), y1 + torch.sin(t1 + t2)
+        return torch.cat((x1, y1, x2, y2, vel[:, 0:1], vel[:, 1:2]), dim=1)
 
     def reset(self):
         self.reference = self.traj.get_next()
@@ -305,17 +307,21 @@ def test_selection_plot():
     replay_memory = ReplayMemory(args, env)
     replay_memory.reset_batchptr_train()
 
-    xy, z = [], []
+    xy_list, z_list = [], []
     for b in range(replay_memory.n_batches_train):
         batch_dict = replay_memory.next_batch_train()
         x, u = torch.from_numpy(batch_dict["states"]), torch.from_numpy(batch_dict['inputs'])
         obs = x.view(args.batch_size * args.seq_length, -1)  # take first batch
         reference_xy = env.get_state_from_obs(obs).numpy()
-        xy.append(reference_xy)
-        z.append(np.random.rand(len(reference_xy)))
+        reference_ddotxy = np.sum(np.square(np.diff(np.diff(reference_xy, axis=1))), axis=2)
+        z = []
+        for ref_ddotxy, ref_xy in zip(reference_ddotxy, reference_xy):
+            z.append(ref_ddotxy.max(0))
+        xy_list.append(reference_xy)
+        z_list.append(np.array(z))
 
-    xy = np.array(xy).reshape(-1, env.n, 2)
-    z = np.array(z).reshape(-1)
+    xy = np.array(xy_list).reshape(-1, env.n, 2)
+    z = np.array(z_list).reshape(-1)
     sp.add(xy, z)
     sp.plot(f"../img/selection", env.s_min, env.s_max, env.s_min, env.s_max)
 
@@ -343,4 +349,4 @@ def make_plot():
 
 
 if __name__ == '__main__':
-    make_plot()
+    test_selection_plot()

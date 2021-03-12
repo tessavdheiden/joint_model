@@ -31,16 +31,17 @@ class SelectionPlot(object):
             d[key] = np.array(traj_lst).mean(0)
             e[key] = np.array(z_merged[key]).mean(0)
 
-        c = plt.cm.plasma(np.linspace(0, 1, len(e)))
-        idx = np.argsort(list(e.values()))
+        c = plt.cm.viridis(np.linspace(0, 1, len(e)))
+        e = {k: e[k] for k in sorted(e, key=e.get)}
 
-        for i, (key, traj) in enumerate(d.items()):
-            if idx[i] == 0:
-                plt.scatter(traj[:, 0], traj[:, 1], color=c[idx[i]], label=f'min={e[key]:.2f}')
-            elif idx[i] == max(idx):
-                plt.scatter(traj[:, 0], traj[:, 1], color=c[idx[i]], label=f'max={e[key]:.2f}')
+        for i, (k, z_val) in enumerate(e.items()):
+            traj = d[k]
+            if i == 0:
+                plt.scatter(traj[:, 0], traj[:, 1], color=c[i], label=f'min={z_val:.4f}')
+            elif i == len(e) - 1:
+                plt.scatter(traj[:, 0], traj[:, 1], color=c[i], label=f'max={z_val:.4f}')
             else:
-                plt.scatter(traj[:, 0], traj[:, 1], color=c[idx[i]])
+                plt.scatter(traj[:, 0], traj[:, 1], color=c[i])
         plt.axis([xmin, xmax, ymin, ymax])
         plt.legend()
         plt.tight_layout()

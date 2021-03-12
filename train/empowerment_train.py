@@ -67,7 +67,7 @@ def main():
     parser.add_argument('--seq_length', type=int, default=2, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=32, help='minibatch size')
     parser.add_argument('--num_epochs', type=int, default=2001, help='number of epochs')
-    parser.add_argument('--n_trials', type=int, default=1000,
+    parser.add_argument('--n_trials', type=int, default=3000,
                         help='number of data sequences to collect in each episode')
     parser.add_argument('--trial_len', type=int, default=2, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=1,
