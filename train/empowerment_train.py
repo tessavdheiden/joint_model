@@ -43,11 +43,12 @@ def train_empowerment(env, empowerment, replay_memory, args, bayes_filter=None):
                 x = torch.from_numpy(x.reshape(-1, x.shape[2]))
                 e = empowerment(x)
 
-                ref_xy = env.get_state_from_obs(x).numpy()
-                sp.add(xy=ref_xy, z=e)
-                sp.plot(f'img/empoerment_selection', env.s_min, env.s_max, env.s_min, env.s_max)
-                # lp.add(xy=pd.DataFrame(x, index=np.arange(len(x)), columns=env.state_names), z=cast(e).reshape(-1, 1))
-                # lp.plot('img/landscape')
+                # ref_xy = env.get_state_from_obs(x).numpy()
+                # sp.add(xy=ref_xy, z=e)
+                # sp.plot(f'img/empoerment_selection{args.seed}{i}', env.s_min, env.s_max, env.s_min, env.s_max)
+                x = env.get_state_from_obs(x)
+                lp.add(xy=pd.DataFrame(x, index=np.arange(len(x)), columns=env.state_names), z=cast(e).reshape(-1, 1))
+                lp.plot(f'img/landscape_selection{args.seed}{i}')
                 empowerment.save_params()
             empowerment.prepare_update()
 
@@ -67,24 +68,26 @@ def main():
     parser.add_argument('--seq_length', type=int, default=2, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=32, help='minibatch size')
     parser.add_argument('--num_epochs', type=int, default=2001, help='number of epochs')
-    parser.add_argument('--n_trials', type=int, default=3000,
+    parser.add_argument('--n_trials', type=int, default=10000,
                         help='number of data sequences to collect in each episode')
     parser.add_argument('--trial_len', type=int, default=2, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=1,
                         help='number of subsequences to divide each sequence into')
-    parser.add_argument('--env', type=str, default='controlled_arm',
+    parser.add_argument('--env', type=str, default='ball_in_box',
                         help='pendulum, ball_in_box, tanh2d, arm, reacher, pendulum')
     parser.add_argument('--filter_type', type=int, default=1,
                         help='0=bayes filter, 1=bayes filter fully connected')
     parser.add_argument('--use_filter', type=int, default=0, help='0=env, 1=filter')
     parser.add_argument('--n_step', type=int, default=1, help='empowerment calculated over n actions')
+    parser.add_argument('--seed', type=int, default=0, help='seed')
+    parser.add_argument('--load_data', type=bool, default=0, help='generate data')
     args = parser.parse_args()
 
     if not os.path.exists('../param'):
         print('bayes filter not trained')
 
-    torch.manual_seed(0)
-    np.random.seed(0)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
     if args.env == 'pendulum':
         env = PendulumEnv()
     elif args.env == 'ball_in_box':
@@ -99,7 +102,7 @@ def main():
         env = ReacherControlledEnv()
     elif args.env == 'controlled_arm':
         env = ControlledArmEnv()
-    env.seed(0)
+    env.seed(args.seed)
 
     replay_memory = ReplayMemory(args, env)
 

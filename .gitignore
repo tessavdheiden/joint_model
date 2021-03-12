@@ -134,3 +134,4 @@ param/
 .idea
 *.gif
 *.png
+*.npy

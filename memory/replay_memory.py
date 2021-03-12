@@ -1,7 +1,6 @@
 import math
 import numpy as np
-import pdb
-import random
+import os
 import progressbar
 
 
@@ -25,7 +24,13 @@ class ReplayMemory():
         print('validation fraction: ', args.val_frac)
 
         print("generating data...")
-        self._generate_data(args)
+        pf = os.path.join(os.getcwd(), os.path.dirname(__file__), f'data_{env.name}.npy')
+        if os.path.exists(pf) and args.load_data:
+            self._load(pf)
+        else:
+            self._generate_data(args)
+            self._save(pf)
+
         self._create_inputs_targets(args)
 
         print('creating splits...')
@@ -33,6 +38,21 @@ class ReplayMemory():
 
         print('shifting/scaling data...')
         self._shift_scale(args)
+
+    def _load(self, pf):
+        data = np.load(pf, allow_pickle=True)
+        self.x = data.item().get('x')
+        self.u = data.item().get('u')
+        self.x_test = data.item().get('x_test')
+        self.u_test = data.item().get('u_test')
+
+    def _save(self, pf):
+        data = {}
+        data['x'] = self.x
+        data['u'] = self.u
+        data['x_test'] = self.x_test
+        data['u_test'] = self.u_test
+        np.save(pf, data)
 
     def _generate_data(self, args):
         # Initialize array to hold states and actions

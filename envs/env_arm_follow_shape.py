@@ -236,8 +236,8 @@ def solve_trajectory():
             thetas.data -= learning_rate * thetas.grad.data
             thetas.grad.data.zero_()
 
-        env.state = thetas.detach().numpy().squeeze(0)
-        env.render()
+            env.state = thetas.detach().numpy().squeeze(0)
+            env.render()
         traj[j, :2] = thetas.detach().numpy().squeeze(0)
 
     return traj
