@@ -73,8 +73,8 @@ def main():
     parser.add_argument('--trial_len', type=int, default=2, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=1,
                         help='number of subsequences to divide each sequence into')
-    parser.add_argument('--env', type=str, default='ball_in_box',
-                        help='pendulum, ball_in_box, tanh2d, arm, reacher, pendulum')
+    parser.add_argument('--env', type=str, default='ball_in_box_force',
+                        help='pendulum, ball_in_box, ball_in_box_force, tanh2d, arm, reacher, pendulum')
     parser.add_argument('--filter_type', type=int, default=1,
                         help='0=bayes filter, 1=bayes filter fully connected')
     parser.add_argument('--use_filter', type=int, default=0, help='0=env, 1=filter')
@@ -92,6 +92,8 @@ def main():
         env = PendulumEnv()
     elif args.env == 'ball_in_box':
         env = BallBoxEnv()
+    elif args.env == 'ball_in_box_force':
+        env = BallBoxForceEnv()
     elif args.env == 'tanh2d':
         env = Tanh2DEnv()
     elif args.env == 'reacher':

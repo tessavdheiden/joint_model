@@ -18,7 +18,7 @@ Transition = namedtuple('Transition', ['s', 'a', 'r', 's_'])
 from envs import *
 from viz import *
 
-np.random.seed(30)
+np.random.seed(1)
 torch.manual_seed(1)
 
 MAX_EPISODES = 200
@@ -33,7 +33,7 @@ MEMORY_CAPACITY = 5000
 BATCH_SIZE = 16
 VAR_MIN = 0.1
 
-env = ArmFollowShapeEnv()
+env = BallBoxForceEnv()
 STATE_DIM = env.observation_space.shape[0]
 H_DIM = 200
 ACTION_DIM = env.action_dim
@@ -253,7 +253,7 @@ def eval():
     b = BenchmarkPlot()
     v = Video()
 
-    data = env.get_benchmark_data()
+#    data = env.get_benchmark_data()
 
     for t in range(MAX_EP_STEPS):
         if RENDER:
@@ -261,12 +261,12 @@ def eval():
         a = agent.select_action(s).detach().numpy().squeeze(0)
 
         s_, r, done, _ = env.step(a)
-        data = env.get_benchmark_data(data)
+        # data = env.get_benchmark_data(data)
         s = s_
 
-    env.do_benchmark(data)
-    b.add(data)
-    b.plot("img/derivatives.png")
+    # env.do_benchmark(data)
+    # b.add(data)
+    # b.plot("img/derivatives.png")
     env.close()
 
     v.save('img/video.gif')
