@@ -18,8 +18,8 @@ Transition = namedtuple('Transition', ['s', 'a', 'r', 's_'])
 from envs import *
 from viz import *
 
-np.random.seed(1)
-torch.manual_seed(1)
+np.random.seed(0)
+torch.manual_seed(0)
 
 MAX_EPISODES = 200
 MAX_EP_STEPS = 100
@@ -40,7 +40,7 @@ ACTION_DIM = env.action_dim
 ACTION_SCALE = env.u_high
 ACTION_BOUND = env.u_high
 RENDER = True
-LOAD = True
+LOAD = False
 EMPOWERMENT = False
 
 
@@ -48,6 +48,25 @@ def init_weights(m):
     if type(m) == nn.Linear:
         torch.nn.init.xavier_uniform_(m.weight)
         m.bias.data.fill_(0.01)
+
+
+class RecurrentUnit(nn.Module):
+    def __init__(self):
+        super(RecurrentUnit, self).__init__()
+        self.lstm = nn.LSTM(H_DIM, H_DIM)
+        self.h_0 = nn.Parameter(torch.randn(H_DIM))
+        self.c_0 = nn.Parameter(torch.randn(H_DIM))
+
+    def init_state(self, batch_size):
+        h_0 = self.h_0.repeat(1, batch_size, 1)
+        c_0 = self.c_0.repeat(1, batch_size, 1)
+        return (h_0, c_0)
+
+    def forward(self, x):
+        batch_size, feat_size = x.shape
+        state = self.init_state(batch_size)
+        x, _ = self.lstm(x.unsqueeze(0), state)
+        return x.view(batch_size, feat_size)
 
 
 class ActorNet(nn.Module):
@@ -58,6 +77,7 @@ class ActorNet(nn.Module):
                                 nn.Linear(H_DIM, H_DIM),
                                 nn.ReLU6(),
                                 nn.Linear(H_DIM, H_DIM))
+        self.fc2 = RecurrentUnit()
         self.mu_head = nn.Linear(H_DIM, ACTION_DIM)
 
         self.fc.apply(init_weights)
@@ -65,7 +85,8 @@ class ActorNet(nn.Module):
 
     def forward(self, s):
         x = F.relu(self.fc(s))
-        u = ACTION_SCALE[0] * F.tanh(self.mu_head(x))
+        x = F.relu(self.fc2(x))
+        u = ACTION_SCALE[0] * torch.tanh(self.mu_head(x))
         return u
 
 

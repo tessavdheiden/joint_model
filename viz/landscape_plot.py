@@ -24,3 +24,4 @@ class LandscapePlot(object):
             #ax.axis('square')
             plt.tight_layout()
             plt.savefig(f'{save_path}_{xname}_vs_{yname}.png')
+        plt.close()
