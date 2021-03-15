@@ -21,6 +21,7 @@ class Trajectory(object):
         self.n = n
         with open(pf, 'rb') as f:
             traj = np.load(f)
+            #traj = np.roll(traj, 10)
         self.N = len(traj)
         assert self.N / n == int(self.N / n)
 
@@ -49,12 +50,12 @@ class ControlledArmEnv(AbsEnv):
     MAX_VEL = 9 * pi
     GAIN_P = 8.
     GAIN_D = 1.
-    n = 10
-    action_dim = 4 * n
+    n = 50
+    action_dim = 4
     state_dim = 4
     m = Trajectory.observation_space.shape[0]
 
-    u_high = np.ones(action_dim) * .0001
+    u_high = np.ones(action_dim)
     u_low = -u_high
     action_space = spaces.Box(
         low=u_low,
@@ -76,101 +77,95 @@ class ControlledArmEnv(AbsEnv):
 
     def __init__(self):
         self.name = 'ControlledArm'
-        # self.state = np.zeros(self.state_dim)
-        self.states = np.zeros((self.n, self.state_dim))
-        self.p = np.ones(2) * self.GAIN_P
-        self.d = np.ones(2) * self.GAIN_D
-        self.ptorch = torch.from_numpy(self.p)
-        self.dtorch = torch.from_numpy(self.d)
         self.traj = Trajectory(self.n)
-        self.state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'barθ1r', 'barθ2r']
+        self.state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'θ1_r', 'θ2_r', 'dotθ1_r', 'dotθ2_r']
         self.viewer = None
 
-    def single_step(self, s, a, t):
-        target = self.reference[t] + a[t]
-        th, thdot = s[:2], s[2:4]
+    def step(self, u):
+        x, dotx, t, dott = self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8]
+        dx, dv = u[0:2], u[2:4]
+        for i in range(self.n):
+            self.states[i] = x
+            self.targets[i] = t
 
-        delta_p = angle_normalize(target[:2] - th)
-        delta_v = target[2:4] - thdot
+            delta_x, delta_v = t - x, dott - dotx
+            ddotx = delta_x * dx + delta_v * dv
+            dotx = dotx + ddotx * self.dt
+            x = x + dotx * self.dt
 
-        alpha = self.p * delta_p + self.d * delta_v
+            t = t + dott * self.dt
 
-        newthdot = thdot + alpha * self.dt
-        newth = angle_normalize(th + newthdot * self.dt)
-        state = np.hstack([newth, newthdot])
-        return state
-
-    def step(self, a):
-        a = a.reshape(self.n, self.m)
-        self.reference = self.traj.get_next()
-        state = self.reference[0]
-        for t in range(self.n):
-            state = self.single_step(state, a, t)
-            self.states[t] = state
-
+        self.state = np.concatenate([x, dotx, t, dott])
         obs = self._get_obs()
         return obs, None, [], {}
 
     def _get_obs(self):
         l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
-        obs = np.zeros((self.n, self.obs_dim))
-        for t in range(self.n):
-            t1, t2 = self.states[t, 0], self.states[t, 1]
-            x1, y1 = l1*cos(t1), l1*sin(t1)
-            x2, y2 = x1 + l2*cos(t1+t2), y1 + l2*sin(t1+t2)
-            obs[t] = np.hstack([x1, y1, x2, y2, self.states[t, 2], self.states[t, 3]])
+        x = self.state[:2]
+        xy1 = np.array([l1*cos(x[0]), l1*sin(x[0])])
+        xy2 = xy1 + np.array([l2*cos(x[0]+x[1]), l2*sin(x[0]+x[1])])
 
-        return np.hstack((np.ravel(obs), np.ravel(self.reference)))
+        t = self.state[4:6]
+        txy1 = np.array([l1 * cos(t[0]), l1 * sin(t[0])])
+        txy2 = txy1 + np.array([l2 * cos(t[0] + t[1]), l2 * sin(t[0] + t[1])])
+
+        return np.concatenate([xy1, xy2, self.state[2:4], txy1, txy2, self.state[6:8]])
+
+    def get_state_from_obs(self, obs):
+        xy1, xy2, dotx, txy1, txy2, dott = obs[:, 0:2], obs[:, 2:4], obs[:, 4:6], obs[:, 6:8], obs[:, 8:10], obs[:, 10:12]
+        th = torch.cat((torch.atan2(xy1[:, 1:2], xy1[:, 0:1]),
+                        torch.atan2(xy2[:, 1:2], xy2[:, 0:1]) - torch.atan2(xy1[:, 1:2], xy1[:, 0:1])), dim=1)
+        tth = torch.cat((torch.atan2(txy1[:, 1:2], txy1[:, 0:1]),
+                        torch.atan2(txy2[:, 1:2], txy2[:, 0:1]) - torch.atan2(txy1[:, 1:2], txy1[:, 0:1])), dim=1)
+        return torch.cat((th, dotx, tth, dott), dim=1)
+
+    def _get_obs_from_state(self, x):
+        l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
+        xy1 = torch.cat([l1 * cos(x[:, 0:1]), l1 * sin(x[:, 0:1])], dim=1)
+        xy2 = xy1 + torch.cat([l2 * cos(x[:, 0:1] + x[:, 1:2]), l2 * sin(x[:, 0:1] + x[:, 1:2])], dim=1)
+
+        t = x[:, 4:6]
+        txy1 = torch.cat([l1 * cos(t[:, 0:1]), l1 * sin(t[:, 0:1])], dim=1)
+        txy2 = txy1 + torch.cat([l2 * cos(t[:, 0:1] + t[:, 1:2]), l2 * sin(t[:, 0:1] + t[:, 1:2])], dim=1)
+        return torch.cat((xy1, xy2, x[:, 2:4], txy1, txy2, x[6:8]))
 
     def step_batch(self, x, u):
-        batch_size = x.shape[0]
-        reference = x[:, -self.n * self.m:].view(batch_size, self.n, self.m)  # end of array contains reference
-        x = x[:, :-self.n * self.m].view(batch_size, self.n, self.obs_dim)     # everything else
-        actions = u.view(batch_size, self.n, -1)
-        actions = torch.clamp(actions, -.01, .01)
+        state = self.get_state_from_obs(x)
+        x, dotx, t, dott = state[:, 2], state[:, 2:4], state[:, 4:6], state[:, 6:8]
 
-        newx = torch.zeros_like(x)
-        for t in range(self.n):
-            target = reference[:, t] + actions[:, t]
-            obs = x[:, t]
+        dx, dv = u[:, 0:2], u[:, 2:4]
+        for i in range(self.n):
+            delta_x, delta_v = t - x, dott - dotx
+            ddotx = delta_x * dx + delta_v * dv
+            dotx = dotx + ddotx * self.dt
+            x = x + dotx * self.dt
 
-            th = torch.cat((torch.atan2(obs[:, 1:2], obs[:, 0:1]), torch.atan2(obs[:, 3:4], obs[:, 2:3])), dim=1)
-            thdot = obs[:, 4:6]
+            t = t + dott * self.dt
 
-            delta_p = angle_normalize(target[:, :2] - th)
-            delta_v = target[:, 2:4] - thdot
-
-            alpha = self.ptorch * delta_p + self.dtorch * delta_v
-
-            newthdot = thdot + alpha * self.dt
-            newth = th + newthdot * self.dt
-            newth = angle_normalize(newth)
-            nobs = self._get_obs_from_state(newth, newthdot)
-            newx[:, t] = nobs
-        newx = newx.view(batch_size, -1)
-        reference = reference.view(batch_size, -1)
-        return torch.cat((newx, reference), dim=1)
-
-    def _get_obs_from_state(self, ang, vel):
-        l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
-        t1, t2 = ang[:, 0:1], ang[:, 1:2]
-        x1, y1 = torch.cos(t1), torch.sin(t1)
-        x2, y2 = x1 + torch.cos(t1 + t2), y1 + torch.sin(t1 + t2)
-        return torch.cat((x1, y1, x2, y2, vel[:, 0:1], vel[:, 1:2]), dim=1)
+        state = torch.cat((x, dotx, t, dott), dim=1)
+        obs = self._get_obs_from_state(state)
+        return obs
 
     def reset(self):
-        self.reference = self.traj.get_next()
-        self.states = self.reference.copy() # important, otherwise states can change reference
+        reference = self.traj.states[90].copy()
+        self.state = np.zeros(12)
+        x, t = reference[:2], reference[:2]
+        dotx, dott = reference[2:4], reference[2:4]
+        self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8] = x, dotx, t, dott
+        self.states = np.zeros((self.n, 2))
+        self.targets = np.zeros((self.n, 2))
+
         return self._get_obs()
 
     def draw(self, s, alpha=1.):
         from gym.envs.classic_control import rendering
         if s is None: return None
 
-        p1 = [self.LINK_LENGTH_1 * cos(s[0]), self.LINK_LENGTH_1 * sin(s[0])]
+        l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
+        p1 = [l1 * cos(s[0]), l1 * sin(s[0])]
 
-        p2 = [p1[0] + self.LINK_LENGTH_2 * cos(s[0] + s[1]),
-              p1[1] + self.LINK_LENGTH_2 * sin(s[0] + s[1])]
+        p2 = [p1[0] + l2 * cos(s[0] + s[1]),
+              p1[1] + l2 * sin(s[0] + s[1])]
 
         xys = np.array([[0, 0], p1, p2])#[:, ::-1]
         thetas = [s[0], s[0] + s[1]]
@@ -200,18 +195,17 @@ class ControlledArmEnv(AbsEnv):
                 p.add_attr(self.reference_transform[i])
                 self.viewer.add_geom(p)
 
-        for i, p in enumerate(self.reference):
-            s = p
-            p1 = [self.LINK_LENGTH_1 * cos(s[0]), self.LINK_LENGTH_1 * sin(s[0])]
-
-            p2 = [p1[0] + self.LINK_LENGTH_2 * cos(s[0] + s[1]),
-                  p1[1] + self.LINK_LENGTH_2 * sin(s[0] + s[1])]
-            self.reference_transform[i].set_translation(*p2)
+        l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
+        for i in range(self.n):
+            t = self.targets[i]
+            txy1 = np.array([l1 * cos(t[0]), l1 * sin(t[0])])
+            txy2 = txy1 + np.array([l2 * cos(t[0] + t[1]), l2 * sin(t[0] + t[1])])
+            self.reference_transform[i].set_translation(*txy2)
 
         images = []
         for t in range(self.n):
-            self.draw(self.states[t, :2])
-            self.draw(self.reference[t, :2], .2)
+            self.draw(self.states[t])
+            self.draw(self.targets[t], .2)
 
             images.append(self.viewer.render(return_rgb_array=mode == 'rgb_array'))
         return images
@@ -243,21 +237,6 @@ class ControlledArmEnv(AbsEnv):
 
         return data
 
-    def get_state_from_obs(self, obs):
-        batch_size = obs.shape[0]
-        reference = obs[:, -self.n * self.m:].view(batch_size, self.n, self.m)  # end of array contains reference
-        reference_xy = torch.zeros((batch_size, self.n, 2))
-        for t in range(self.n):
-            th1 = reference[:, t, 0:1]
-            th2 = reference[:, t, 1:2]
-            x1 = self.LINK_LENGTH_1 * torch.cos(th1)
-            y1 = self.LINK_LENGTH_1 * torch.sin(th1)
-            x2 = x1 + self.LINK_LENGTH_2 * torch.cos(th1 + th2)
-            y2 = y1 + self.LINK_LENGTH_2 * torch.sin(th1 + th2)
-            reference_xy[:, t] = torch.cat((x2, y2), dim=1)
-
-        return reference_xy.view(batch_size, self.n, 2)
-
 
 def make_video():
     from viz.video import Video
@@ -265,16 +244,13 @@ def make_video():
     env = ControlledArmEnv()
     env.seed()
     env.reset()
-    images = env.render(mode='rgb_array')
-    for image in images:
-        v.add(image)
-    for _ in range(11):
-        a = env.action_space.sample()
+    for _ in range(4):
+        a = env.action_space.sample() * 0 + np.array([1, 1, 8, 8])
         env.step(a)
         images = env.render(mode='rgb_array')
         for image in images:
             v.add(image)
-    v.save(f'../img/p={env.p}_d={env.d}.gif')
+    v.save(f'../img/vid.gif')
     env.close()
 
 
@@ -349,4 +325,4 @@ def make_plot():
 
 
 if __name__ == '__main__':
-    test_selection_plot()
+    make_video()

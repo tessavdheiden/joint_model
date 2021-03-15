@@ -74,11 +74,11 @@ class ReplayMemory():
 
             # Reset environment and simulate with random actions
             x_trial[0] = self.env.reset()
-            for t in range(1, self.trial_len):
-                action = self.env.action_space.sample() * 0.
-                u_trial[t - 1] = action
-                step_info = self.env.step(action)
-                x_trial[t] = np.squeeze(step_info[0])
+            # for t in range(1, self.trial_len):
+            #     action = self.env.action_space.sample() * 0.
+            #     u_trial[t - 1] = action
+            #     step_info = self.env.step(action)
+            #     x_trial[t] = np.squeeze(step_info[0])
 
             # Divide into subsequences
             for j in range(self.n_subseq):

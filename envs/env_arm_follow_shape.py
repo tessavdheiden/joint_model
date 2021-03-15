@@ -91,7 +91,7 @@ class ArmFollowShapeEnv(AbsEnv):
         self.name = 'Arm'
         self.state = np.zeros(2)
         self.target_location = np.zeros(2)
-        self.shape = Rectangle((0, 0), 2, 3, 1000)
+        self.shape = Rectangle((0, 0), 2, 2, 400)
 
         self.viewer = None
 
@@ -236,8 +236,8 @@ def solve_trajectory():
             thetas.data -= learning_rate * thetas.grad.data
             thetas.grad.data.zero_()
 
-            env.state = thetas.detach().numpy().squeeze(0)
-            env.render()
+        env.state = thetas.detach().numpy().squeeze(0)
+        env.render()
         traj[j, :2] = thetas.detach().numpy().squeeze(0)
 
     return traj

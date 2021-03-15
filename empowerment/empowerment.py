@@ -24,7 +24,7 @@ class Net(nn.Module):
 
     def forward(self, x):
         x = F.relu(self.fc(x))
-        mu = torch.tanh(self.mu_head(x))
+        mu = self.mu_head(x)
         sigma = F.softplus(self.sigma_head(x))
         return (mu, sigma)
 
@@ -138,7 +138,7 @@ class Empowerment(nn.Module):
             self.opt_q.zero_grad()
             E = self(s)
             L = -E.mean()
-            L.backward(retain_graph=True)
+            L.backward()
             self.opt_q.step()
 
         self.opt_ω.zero_grad()
