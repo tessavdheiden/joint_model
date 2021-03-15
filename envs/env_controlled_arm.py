@@ -15,19 +15,22 @@ class Trajectory(object):
         dtype=np.float32
     )
 
-    def __init__(self, n):
+    def __init__(self, n, order, dt):
         pf = os.path.join(os.getcwd(), os.path.dirname(__file__), 'traj.npy')
         assert os.path.exists(pf)
         self.n = n
         with open(pf, 'rb') as f:
             traj = np.load(f)
-            #traj = np.roll(traj, 10)
         self.N = len(traj)
         assert self.N / n == int(self.N / n)
 
-        self.states = np.zeros((self.N, 4))
+        self.states = np.zeros((self.N, (order+1) * 2))
         self.states[:, :2] = traj
-        self.states[:-1, 2:4] = np.diff(traj, axis=0)
+        for i in range(1, order+1):
+            l1, r1 = i*2, i*2+2
+            l2, r2 = (i-1)*2, (i-1)*2+2
+            self.states[i:, l1:r1] = np.diff(self.states[i-1:, l2:r2], axis=0) / dt
+
         self.it = 0
 
     def get_next(self):
@@ -52,7 +55,7 @@ class ControlledArmEnv(AbsEnv):
     GAIN_D = 1.
     n = 50
     action_dim = 4
-    state_dim = 4
+    state_dim = 8
     m = Trajectory.observation_space.shape[0]
 
     u_high = np.ones(action_dim)
@@ -65,10 +68,10 @@ class ControlledArmEnv(AbsEnv):
 
     s_max = LINK_LENGTH_1 + LINK_LENGTH_2
     s_min = -s_max
-    obs_dim = state_dim + 2  # +2 for cos and sin
+    obs_dim = 12  # +2 for cos and sin
     observation_space = spaces.Box(
         low=-s_max,
-        high=s_max, shape=(n * (obs_dim + m),),
+        high=s_max, shape=(obs_dim,),
         dtype=np.float32
     )
 
@@ -77,8 +80,9 @@ class ControlledArmEnv(AbsEnv):
 
     def __init__(self):
         self.name = 'ControlledArm'
-        self.traj = Trajectory(self.n)
-        self.state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'θ1_r', 'θ2_r', 'dotθ1_r', 'dotθ2_r']
+        self.traj = Trajectory(self.n, 2, self.dt)
+        self.state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'θ1r', 'θ2r', 'dotθ1r', 'dotθ2r']
+        self.obs_names = ['x1', 'y1', 'x2', 'y2', 'ω1', 'ω2', 'x1r', 'y1r', 'x2r', 'y2r', 'ω1r', 'ω2r']
         self.viewer = None
 
     def step(self, u):
@@ -112,26 +116,32 @@ class ControlledArmEnv(AbsEnv):
         return np.concatenate([xy1, xy2, self.state[2:4], txy1, txy2, self.state[6:8]])
 
     def get_state_from_obs(self, obs):
+        # s = np.random.rand(2) * 2 * pi - pi
+        # obs = env._get_obs_from_state(torch.from_numpy(s).unsqueeze(0))
+        # assert all(s == env.get_state_from_obs(obs).squeeze(0).numpy())
         xy1, xy2, dotx, txy1, txy2, dott = obs[:, 0:2], obs[:, 2:4], obs[:, 4:6], obs[:, 6:8], obs[:, 8:10], obs[:, 10:12]
-        th = torch.cat((torch.atan2(xy1[:, 1:2], xy1[:, 0:1]),
-                        torch.atan2(xy2[:, 1:2], xy2[:, 0:1]) - torch.atan2(xy1[:, 1:2], xy1[:, 0:1])), dim=1)
-        tth = torch.cat((torch.atan2(txy1[:, 1:2], txy1[:, 0:1]),
-                        torch.atan2(txy2[:, 1:2], txy2[:, 0:1]) - torch.atan2(txy1[:, 1:2], txy1[:, 0:1])), dim=1)
-        return torch.cat((th, dotx, tth, dott), dim=1)
+        th1 = torch.atan2(xy1[:, 1:2], xy1[:, 0:1])
+        th2 = torch.atan2(xy2[:, 1:2] - xy1[:, 1:2], xy2[:, 0:1] - xy1[:, 0:1]) - th1
+        th = torch.cat((th1, th2), dim=1)
+
+        tth1 = torch.atan2(txy1[:, 1:2], txy1[:, 0:1])
+        tth2 = torch.atan2(txy2[:, 1:2] - txy1[:, 1:2], txy2[:, 0:1] - txy1[:, 0:1]) - tth1
+        tth = torch.cat((tth1, tth2), dim=1)
+        return torch.cat((angle_normalize(th), dotx, angle_normalize(tth), dott), dim=1)
 
     def _get_obs_from_state(self, x):
         l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
-        xy1 = torch.cat([l1 * cos(x[:, 0:1]), l1 * sin(x[:, 0:1])], dim=1)
-        xy2 = xy1 + torch.cat([l2 * cos(x[:, 0:1] + x[:, 1:2]), l2 * sin(x[:, 0:1] + x[:, 1:2])], dim=1)
+        xy1 = torch.cat((l1 * torch.cos(x[:, 0:1]), l1 * torch.sin(x[:, 0:1])), dim=1)
+        xy2 = xy1 + torch.cat([l2 * torch.cos(x[:, 0:1] + x[:, 1:2]), l2 * torch.sin(x[:, 0:1] + x[:, 1:2])], dim=1)
 
         t = x[:, 4:6]
-        txy1 = torch.cat([l1 * cos(t[:, 0:1]), l1 * sin(t[:, 0:1])], dim=1)
-        txy2 = txy1 + torch.cat([l2 * cos(t[:, 0:1] + t[:, 1:2]), l2 * sin(t[:, 0:1] + t[:, 1:2])], dim=1)
-        return torch.cat((xy1, xy2, x[:, 2:4], txy1, txy2, x[6:8]))
+        txy1 = torch.cat([l1 * torch.cos(t[:, 0:1]), l1 * torch.sin(t[:, 0:1])], dim=1)
+        txy2 = txy1 + torch.cat([l2 * torch.cos(t[:, 0:1] + t[:, 1:2]), l2 * torch.sin(t[:, 0:1] + t[:, 1:2])], dim=1)
+        return torch.cat((xy1, xy2, x[:, 2:4], txy1, txy2, x[:, 6:8]), dim=1)
 
     def step_batch(self, x, u):
         state = self.get_state_from_obs(x)
-        x, dotx, t, dott = state[:, 2], state[:, 2:4], state[:, 4:6], state[:, 6:8]
+        x, dotx, t, dott = state[:, :2], state[:, 2:4], state[:, 4:6], state[:, 6:8]
 
         dx, dv = u[:, 0:2], u[:, 2:4]
         for i in range(self.n):
@@ -139,7 +149,6 @@ class ControlledArmEnv(AbsEnv):
             ddotx = delta_x * dx + delta_v * dv
             dotx = dotx + ddotx * self.dt
             x = x + dotx * self.dt
-
             t = t + dott * self.dt
 
         state = torch.cat((x, dotx, t, dott), dim=1)
@@ -147,8 +156,9 @@ class ControlledArmEnv(AbsEnv):
         return obs
 
     def reset(self):
-        reference = self.traj.states[90].copy()
-        self.state = np.zeros(12)
+        i = np.random.choice(len(self.traj.states)-self.n)
+        reference = self.traj.states[i].copy()
+        self.state = np.zeros(8)
         x, t = reference[:2], reference[:2]
         dotx, dott = reference[2:4], reference[2:4]
         self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8] = x, dotx, t, dott
@@ -326,3 +336,4 @@ def make_plot():
 
 if __name__ == '__main__':
     make_video()
+
