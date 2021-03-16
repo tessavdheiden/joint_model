@@ -5,38 +5,7 @@ import os
 import torch
 
 from envs.env_abs import AbsEnv
-from envs.misc import angle_normalize
-
-
-class Trajectory(object):
-    observation_space = spaces.Box(
-        low=-1,
-        high=1, shape=(4,),
-        dtype=np.float32
-    )
-
-    def __init__(self, n, order, dt):
-        pf = os.path.join(os.getcwd(), os.path.dirname(__file__), 'traj.npy')
-        assert os.path.exists(pf)
-        self.n = n
-        with open(pf, 'rb') as f:
-            traj = np.load(f)
-        self.N = len(traj)
-        assert self.N / n == int(self.N / n)
-
-        self.states = np.zeros((self.N, (order+1) * 2))
-        self.states[:, :2] = traj
-        for i in range(1, order+1):
-            l1, r1 = i*2, i*2+2
-            l2, r2 = (i-1)*2, (i-1)*2+2
-            self.states[i:, l1:r1] = np.diff(self.states[i-1:, l2:r2], axis=0) / dt
-
-        self.it = 0
-
-    def get_next(self):
-        res = self.states[self.it:self.it + self.n]
-        self.it = (self.it + self.n) % len(self.states)
-        return res
+from envs.misc import angle_normalize, Trajectory
 
 
 class ControlledArmEnv(AbsEnv):
@@ -50,13 +19,12 @@ class ControlledArmEnv(AbsEnv):
     LINK_LENGTH_1 = 1
     LINK_LENGTH_2 = 1
 
-    MAX_VEL = 9 * pi
+    MAX_VEL = .06
     GAIN_P = 8.
     GAIN_D = 1.
-    n = 50
+    n = 4
     action_dim = 4
     state_dim = 8
-    m = Trajectory.observation_space.shape[0]
 
     u_high = np.ones(action_dim)
     u_low = -u_high
@@ -81,6 +49,7 @@ class ControlledArmEnv(AbsEnv):
     def __init__(self):
         self.name = 'ControlledArm'
         self.traj = Trajectory(self.n, 2, self.dt)
+
         self.state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'θ1r', 'θ2r', 'dotθ1r', 'dotθ2r']
         self.obs_names = ['x1', 'y1', 'x2', 'y2', 'ω1', 'ω2', 'x1r', 'y1r', 'x2r', 'y2r', 'ω1r', 'ω2r']
         self.viewer = None
@@ -95,8 +64,8 @@ class ControlledArmEnv(AbsEnv):
             delta_x, delta_v = t - x, dott - dotx
             ddotx = delta_x * dx + delta_v * dv
             dotx = dotx + ddotx * self.dt
-            x = x + dotx * self.dt
 
+            x = x + dotx * self.dt
             t = t + dott * self.dt
 
         self.state = np.concatenate([x, dotx, t, dott])
@@ -148,8 +117,10 @@ class ControlledArmEnv(AbsEnv):
             delta_x, delta_v = t - x, dott - dotx
             ddotx = delta_x * dx + delta_v * dv
             dotx = dotx + ddotx * self.dt
-            x = x + dotx * self.dt
+            #x = x + dotx * self.dt
             t = t + dott * self.dt
+
+            x = torch.where(torch.abs(dotx[:, 1:2]) < self.MAX_VEL, x, x + dotx * self.dt)
 
         state = torch.cat((x, dotx, t, dott), dim=1)
         obs = self._get_obs_from_state(state)
@@ -222,31 +193,28 @@ class ControlledArmEnv(AbsEnv):
 
     def get_benchmark_data(self, data={}):
         if len(data) == 0:
-            names = ['θ1', 'θ2', 'dotθ1', 'dotθ2' ,'ddotθ1', 'ddotθ2']
+            names = ['x2', 'y2', 'x2r', 'y2r', 'ω1', 'ω2', 'ω1r', 'ω2r']
             data = {name: [] for name in names}
 
-        data['θ1'].append(self.states[:, 0].copy())
-        data['θ2'].append(self.states[:, 1].copy())
-        data['dotθ1'].append(self.states[:, 2].copy())
-        data['dotθ2'].append(self.states[:, 3].copy())
+        obs = self._get_obs()
+        data['x2'].append(obs[2])
+        data['y2'].append(obs[3])
+        data['x2r'].append(obs[8])
+        data['y2r'].append(obs[9])
+        data['ω1'].append(self.state[2])
+        data['ω2'].append(self.state[2])
+        data['ω1r'].append(self.state[6])
+        data['ω2r'].append(self.state[7])
 
         return data
 
     def do_benchmark(self, data):
         names = list(data.keys())
         # convert to numpy
-        for i, name in enumerate(names[:4]):
+        for i, name in enumerate(names):
             data[name] = np.array(data[name])
 
-        data['ddotθ1'] = np.diff(data['dotθ1'], axis=1) / self.dt
-        data['ddotθ2'] = np.diff(data['dotθ2'], axis=1) / self.dt
-
-        # take max for each trajectories
-        for i, name in enumerate(names):
-            data[name] = np.max(data[name], axis=1)
-
         return data
-
 
 def make_video():
     from viz.video import Video
@@ -312,7 +280,7 @@ def test_selection_plot():
     sp.plot(f"../img/selection", env.s_min, env.s_max, env.s_min, env.s_max)
 
 
-def make_plot():
+def make_benchmark_plot():
     from viz.benchmark_plot import BenchmarkPlot
     b = BenchmarkPlot()
 
@@ -334,6 +302,21 @@ def make_plot():
     env.close()
 
 
+def make_landscape_plot():
+    from viz.landscape_plot import LandscapePlot
+    import pandas as pd
+    lp = LandscapePlot()
+
+    env = ControlledArmEnv()
+    env.seed()
+    env.reset()
+    env.traj = Trajectory(800, 3, .1)
+    s = torch.from_numpy(env.traj.states)
+    o = env._get_obs_from_state(torch.cat((s, s), dim=1))
+    lp.add(xy=pd.DataFrame(o[:, 2:4], index=np.arange(len(s)), columns=['x2', 'y2']), z=torch.abs(s[:, 3:4]))
+    lp.plot(f'../img/test')
+    env.close()
+
 if __name__ == '__main__':
-    make_video()
+    make_landscape_plot()
 

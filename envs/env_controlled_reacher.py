@@ -3,14 +3,15 @@ import torch.nn as nn
 from torchdiffeq import odeint, odeint_adjoint
 import numpy as np
 from gym import spaces
-from numpy import pi
+from numpy import pi, cos, sin
 
 
 from envs.env_abs import AbsEnv
+from envs.misc import Trajectory
 
 
 class Env(AbsEnv):
-    dt = .2
+    dt = .1
     TARGET_CHANGE = .05
 
     LINK_LENGTH_1 = 1.  # [m]
@@ -27,8 +28,8 @@ class Env(AbsEnv):
 
     MAX_TORQUE = 1.
 
-    action_dim = 2
-    u_high = np.array([MAX_GAIN_CHANGE, MAX_GAIN_CHANGE])
+    action_dim = 4
+    u_high = np.ones(action_dim)
     u_low = -u_high
     action_space = spaces.Box(
         low=u_low,
@@ -37,13 +38,11 @@ class Env(AbsEnv):
     )
 
     # cos/sin of 2 angles, 2 angular vel, 2 angle errors, 2 vel errors, 2 p's, 2 d's
-    high = np.array([1, 1, 1, 1, MAX_VEL_1, MAX_VEL_2, pi, pi,
-                     MAX_GAIN_P, MAX_GAIN_D], dtype=np.float32)
-    low = np.array([-1, -1, -1, -1, -MAX_VEL_1, -MAX_VEL_2, -pi, -pi, 0, 0], dtype=np.float32)
-    state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'p', 'd', 'θ1t', 'θ2t']
+    high = LINK_LENGTH_1 + LINK_LENGTH_2
+    obs_dim = 12  # +2 for cos and sin
     observation_space = spaces.Box(
-        low=low,
-        high=high, shape=(10,),
+        low=-high,
+        high=high, shape=(12,),
         dtype=np.float32
     )
     viewer = None
@@ -53,10 +52,7 @@ class Env(AbsEnv):
     grab_counter = 0
 
     def __init__(self):
-        self.state = np.zeros(4)
-        self.p = np.zeros(1)
-        self.d = np.zeros(1)
-        self.target = np.zeros(2)
+        pass
 
     def _dsdt(self, s_augmented, t):
         m1 = self.LINK_MASS_1
@@ -87,119 +83,87 @@ class Env(AbsEnv):
 
         return (dtheta1, dtheta2, ddtheta1, ddtheta2, 0., 0.)
 
-    def _step_target(self):
-        self.target += np.ones(2) * self.TARGET_CHANGE
+    def step(self, u):
+        x, dotx, t, dott = self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8]
+        dx, dv = u[0:2], u[2:4]
 
-    def step(self, a):
-        a = np.clip(a, -self.MAX_GAIN_CHANGE, self.MAX_GAIN_CHANGE)
+        for i in range(self.n):
+            t = self.traj.states[self.it + i, :2]
+            dott = self.traj.states[self.it + i, 2:4]
+            self.states[i] = x
+            self.targets[i] = t
+            delta_x, delta_v = t - x, dott - dotx
+            torque = delta_x * dx + delta_v * dv
 
-        delta_p = angle_normalize(self.target - self.state[:2])
-        delta_v = -self.state[2:]
+            x_ = rk4(self._dsdt, np.hstack([x, dotx, torque]), [0, self.dt])[-1]
+            x = x_[:2]
+            dotx = x_[2:4]
+            # t_ = rk4(self._dsdt, np.hstack([t, dott, torque]), [0, self.dt])[-1]
+            # t = t_[:2]
+            # dott = t_[2:4]
 
-        self.p = np.maximum(self.p + a[:1] * self.dt, 0)
-        self.d = np.maximum(self.d + a[1:] * self.dt, 0)
-
-        torque = np.clip(self.p * delta_p + self.d * delta_v, -self.MAX_TORQUE, self.MAX_TORQUE)
-        s_augmented = np.hstack((self.state, torque))
-        costs = delta_p ** 2 + .1 * self.state[2:] ** 2 + .001 * torque ** 2
-        ns = rk4(self._dsdt, s_augmented, [0, self.dt])
-        # only care about final timestep of integration returned by integrator
-        ns = ns[-1]
-        ns = ns[:4]  # omit action
-
-        # new angle
-        ns[2] = np.clip(ns[2], -self.MAX_VEL_1, self.MAX_VEL_1)
-        ns[3] = np.clip(ns[3], -self.MAX_VEL_2, self.MAX_VEL_2)
-        self.state = ns
-        self._step_target()
-        return self._get_obs(), -costs.sum(), self.get_point, {}
+        self.state = np.concatenate([x, dotx, t, dott])
+        obs = self._get_obs()
+        return obs, None, [], {}
 
     def _get_obs(self):
-        return np.hstack([np.cos(self.state[0]), np.sin(self.state[0]),
-                          np.cos(self.state[1]), np.sin(self.state[1]),
-                          self.state[2], self.state[3],
-                          self.p[0], self.d[0],
-                          self.target[0], self.target[1]])
+        l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
+        x = self.state[:2]
+        xy1 = np.array([l1*cos(x[0]), l1*sin(x[0])])
+        xy2 = xy1 + np.array([l2*cos(x[0]+x[1]), l2*sin(x[0]+x[1])])
 
-    def _r_func(self, distance):
-        t = 50
-        abs_distance = np.sqrt(np.sum(np.square(distance)))
-        r = -abs_distance
-        if abs_distance < self.point_l and (not self.get_point):
-            r += 1.
-            self.grab_counter += 1
-            if self.grab_counter > t:
-                r += 10.
-                self.get_point = True
-        elif abs_distance > self.point_l:
-            self.grab_counter = 0
-            self.get_point = False
-        return r
+        t = self.state[4:6]
+        txy1 = np.array([l1 * cos(t[0]), l1 * sin(t[0])])
+        txy2 = txy1 + np.array([l2 * cos(t[0] + t[1]), l2 * sin(t[0] + t[1])])
 
-    def _reset_target(self):
-        # self.target = self.state[:2] + np.random.rand(2) * pi / 180. * 20
-        self.target = self.state[:2]
+        return np.concatenate([xy1, xy2, self.state[2:4], txy1, txy2, self.state[6:8]])
 
-    def _reset_state(self):
-        theta = np.random.rand(2)*2*pi-pi#np.zeros(2)
-        dtheta = np.zeros(2)
-        self.state = np.array([theta[0], theta[1], dtheta[0], dtheta[1]])
+    def get_state_from_obs(self, obs):
+        # s = np.random.rand(2) * 2 * pi - pi
+        # obs = env._get_obs_from_state(torch.from_numpy(s).unsqueeze(0))
+        # assert all(s == env.get_state_from_obs(obs).squeeze(0).numpy())
+        xy1, xy2, dotx, txy1, txy2, dott = obs[:, 0:2], obs[:, 2:4], obs[:, 4:6], obs[:, 6:8], obs[:, 8:10], obs[:, 10:12]
+        th1 = torch.atan2(xy1[:, 1:2], xy1[:, 0:1])
+        th2 = torch.atan2(xy2[:, 1:2] - xy1[:, 1:2], xy2[:, 0:1] - xy1[:, 0:1]) - th1
+        th = torch.cat((th1, th2), dim=1)
+
+        tth1 = torch.atan2(txy1[:, 1:2], txy1[:, 0:1])
+        tth2 = torch.atan2(txy2[:, 1:2] - txy1[:, 1:2], txy2[:, 0:1] - txy1[:, 0:1]) - tth1
+        tth = torch.cat((tth1, tth2), dim=1)
+        return torch.cat((angle_normalize(th), dotx, angle_normalize(tth), dott), dim=1)
+
+    def _get_obs_from_state(self, x):
+        l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
+        xy1 = torch.cat((l1 * torch.cos(x[:, 0:1]), l1 * torch.sin(x[:, 0:1])), dim=1)
+        xy2 = xy1 + torch.cat([l2 * torch.cos(x[:, 0:1] + x[:, 1:2]), l2 * torch.sin(x[:, 0:1] + x[:, 1:2])], dim=1)
+
+        t = x[:, 4:6]
+        txy1 = torch.cat([l1 * torch.cos(t[:, 0:1]), l1 * torch.sin(t[:, 0:1])], dim=1)
+        txy2 = txy1 + torch.cat([l2 * torch.cos(t[:, 0:1] + t[:, 1:2]), l2 * torch.sin(t[:, 0:1] + t[:, 1:2])], dim=1)
+        return torch.cat((xy1, xy2, x[:, 2:4], txy1, txy2, x[:, 6:8]), dim=1)
 
     def reset(self):
-        self.get_point = False
-        self.grab_counter = 0
-        self.p = np.random.rand(1) * self.MAX_GAIN_P
-        self.d = np.random.rand(1) * self.MAX_GAIN_D
+        i = np.random.choice(len(self.traj.states)-self.n - 1)
+        self.it = i
+        reference = self.traj.states[i].copy()
+        self.state = np.zeros(8)
+        x, t = reference[:2], reference[:2]
+        dotx, dott = reference[2:4], reference[2:4]
+        self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8] = x, dotx, t, dott
+        self.states = np.zeros((self.n, 2))
+        self.targets = np.zeros((self.n, 2))
 
-        self._reset_state()
-        self._reset_target()
         return self._get_obs()
 
-    def get_benchmark_data(self, data={}):
-        if len(data) == 0:
-            names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'ddotθ1', 'ddotθ2', 'dddotθ1', 'dddotθ2', 'p', 'd', 'Δθ1', 'Δθ2']
-            data = {name: [] for name in names}
-
-        names = list(data.keys())
-        for i, name in enumerate(names[:4]):
-            data[name].append(self.state[i])
-
-        data['p'].append(self.p[0])
-        data['d'].append(self.d[0])
-        data['Δθ1'].append(angle_normalize(self.target[0] - self.state[0]))
-        data['Δθ2'].append(angle_normalize(self.target[1] - self.state[1]))
-
-        return data
-
-    def do_benchmark(self, data):
-        names = list(data.keys())
-        # convert to numpy
-        for i, name in enumerate(names):
-            if i < 4:
-                data[name] = np.array(data[name])
-            elif i < 8:
-                data[name] = np.diff(data[names[i-2]]) / self.dt
-            else:
-                data[name] = np.array(data[name])
-
-        return data
-
-    def render(self, mode='human'):
+    def draw(self, s, alpha=1.):
         from gym.envs.classic_control import rendering
-        from numpy import cos, sin
-        s = self.state
-
-        if self.viewer is None:
-            self.viewer = rendering.Viewer(500, 500)
-            bound = self.LINK_LENGTH_1 + self.LINK_LENGTH_2 + 0.2  # 2.2 for default
-            self.viewer.set_bounds(-bound, bound, -bound, bound)
-
         if s is None: return None
 
-        p1 = [self.LINK_LENGTH_1 * cos(s[0]), self.LINK_LENGTH_1 * sin(s[0])]
+        l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
+        p1 = [l1 * cos(s[0]), l1 * sin(s[0])]
 
-        p2 = [p1[0] + self.LINK_LENGTH_2 * cos(s[0] + s[1]),
-              p1[1] + self.LINK_LENGTH_2 * sin(s[0] + s[1])]
+        p2 = [p1[0] + l2 * cos(s[0] + s[1]),
+              p1[1] + l2 * sin(s[0] + s[1])]
 
         xys = np.array([[0, 0], p1, p2])#[:, ::-1]
         thetas = [s[0], s[0] + s[1]]
@@ -210,32 +174,39 @@ class Env(AbsEnv):
             jtransform = rendering.Transform(rotation=th, translation=(x, y))
             link = self.viewer.draw_polygon([(l, b), (l, t), (r, t), (r, b)])
             link.add_attr(jtransform)
-            link.set_color(0, .8, .8)
+            link._color.vec4 = (0, .8, .8, alpha)
             circ = self.viewer.draw_circle(.1)
-            circ.set_color(.8, .8, 0)
+            circ._color.vec4 = (.8, .8, 0, alpha)
             circ.add_attr(jtransform)
 
-        pt = self.target
-        pt1 = [self.LINK_LENGTH_1 * cos(pt[0]), self.LINK_LENGTH_1 * sin(pt[0])]
+    def render(self, mode='human'):
+        from gym.envs.classic_control import rendering
 
-        pt2 = [p1[0] + self.LINK_LENGTH_2 * cos(pt[0] + pt[1]),
-               p1[1] + self.LINK_LENGTH_2 * sin(pt[0] + pt[1])]
+        if self.viewer is None:
+            self.viewer = rendering.Viewer(500, 500)
+            bound = self.LINK_LENGTH_1 + self.LINK_LENGTH_2 + 0.2  # 2.2 for default
+            self.viewer.set_bounds(-bound, bound, -bound, bound)
+            self.reference_transform = [None] * self.n
+            for i in range(self.n):
+                p = rendering.make_circle(.01)
+                self.reference_transform[i] = rendering.Transform()
+                p.add_attr(self.reference_transform[i])
+                self.viewer.add_geom(p)
 
-        xys = np.array([[0, 0], pt1, pt2])  # [:, ::-1]
-        thetas = [pt[0], pt[0] + pt[1]]
-        link_lengths = [self.LINK_LENGTH_1, self.LINK_LENGTH_2]
+        l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
+        for i in range(self.n):
+            t = self.targets[i]
+            txy1 = np.array([l1 * cos(t[0]), l1 * sin(t[0])])
+            txy2 = txy1 + np.array([l2 * cos(t[0] + t[1]), l2 * sin(t[0] + t[1])])
+            self.reference_transform[i].set_translation(*txy2)
 
-        for ((x, y), th, llen) in zip(xys, thetas, link_lengths):
-            l, r, t, b = 0, llen, .1, -.1
-            jtransform = rendering.Transform(rotation=th, translation=(x, y))
-            link = self.viewer.draw_polygon([(l, b), (l, t), (r, t), (r, b)])
-            link.add_attr(jtransform)
-            link._color.vec4 = (0, .8, .8, .2)
-            circ = self.viewer.draw_circle(.1)
-            circ._color.vec4 = (.8, .8, 0, .2)
-            circ.add_attr(jtransform)
+        images = []
+        for i in range(self.n):
+            self.draw(self.states[i])
+            self.draw(self.targets[i], .2)
 
-        return self.viewer.render(return_rgb_array=mode == 'rgb_array')
+            images.append(self.viewer.render(return_rgb_array=mode == 'rgb_array'))
+        return images
 
 
 class ReacherControlledEnv(nn.Module, Env):
@@ -243,6 +214,8 @@ class ReacherControlledEnv(nn.Module, Env):
         super().__init__()
         self.name = 'controlled_reacher'
         self.t0 = nn.Parameter(torch.tensor([0.0]))
+        self.n = 200
+        self.traj = Trajectory(800, 3, self.dt)
 
     def get_initial_obs_action(self):
         state = torch.from_numpy(self.state).float().unsqueeze(0)
@@ -311,19 +284,6 @@ class ReacherControlledEnv(nn.Module, Env):
         target = target + self.TARGET_CHANGE
         return self._get_obs_from_state(ns, target, p, d)
 
-    def _get_obs_from_state(self, state, target, p, d):
-        ang, vel = state[:, :2], state[:, 2:]
-        return torch.cat((torch.cos(ang[:, 0:1]), torch.sin(ang[:, 0:1]),
-                          torch.cos(ang[:, 1:2]), torch.sin(ang[:, 1:2]),
-                          vel[:, 0:1], vel[:, 1:2],
-                          p[:, 0:1], d[:, 0:1],
-                          target[:, 0:1], target[:, 1:2]), dim=1)
-
-    def get_state_from_obs(self, obs):
-        pos, vel = obs[:, :4], obs[:, 4:6]
-        angle = torch.cat((torch.atan2(pos[:, 1:2], pos[:, 0:1]), torch.atan2(pos[:, 3:4], pos[:, 2:3])), dim=1)
-        return torch.cat((angle, obs[:, 4:]), dim=1)
-
 
 def rk4(derivs, y0, t, *args, **kwargs):
     try:
@@ -354,50 +314,21 @@ def angle_normalize(x):
     return (((x + pi) % (2 * pi)) - pi)
 
 
-
-def set(env, task=None, params=None):
-
-    if task=="turn both angles":
-        env.state = np.array([-pi / 2, -pi / 2, 0, 0])
-        env.target = np.array([pi / 2, pi / 2])
-    elif task=="turn half circle":
-        env.state = np.array([0, 0, 0, 0])
-        env.target = np.array([-pi, 0])
-    elif task=="turn quarter circle":
-        env.state = np.array([0, pi/2, 0, 0])
-        env.target = np.array([-pi/2, pi/2])
-    elif task=="point to point":
-        env.state = np.array([pi*(3/4), pi/4, 0, 0])
-        env.target = np.array([pi/4, pi/8])
-
-    if params=="over damped":
-        env.d=np.ones_like(env.p) * env.MAX_GAIN_D
-        env.p=np.ones_like(env.p) * env.MAX_GAIN_P / 2
-    elif params=="chaotic":
-        env.d=np.zeros_like(env.p)
-        env.p=np.ones_like(env.p) * env.MAX_GAIN_P / 2
-    elif params=="good":
-        env.d=np.array([1.13751305, 0.39637199])
-        env.p=np.array([0.0632651,  1.31997793])
-
-
 def make_video():
     from viz.video import Video
-    env = ReacherControlledEnv()
     v = Video()
-
+    env = ReacherControlledEnv()
+    env.seed()
     env.reset()
-    #set(env, params='good', task="turn both angles")
-    # env.p=np.array([1.25, .75])
-    # env.d=np.array([.75, 1.])
-    env.p=np.array([4., 5.])
-    env.d=np.array([2., 2.])
-    for _ in range(100):
-        v.add(env.render(mode='rgb_array'))
-        a = env.action_space.sample() * 0
-        env.step(a)
 
-    v.save(f'../img/p={env.p}_d={env.d}.gif')
+    for _ in range(1000):
+        env.reset()
+        a = env.action_space.sample() * 0 + np.array([8., 8., 1., 1.])
+        env.step(a)
+        images = env.render(mode='rgb_array')
+        for image in images:
+            v.add(image)
+    v.save(f'../img/vid.gif')
     env.close()
 
 
@@ -456,11 +387,22 @@ def use_torchdiffeq():
 
 
 
-if __name__ == '__main__':
-    # make_video()
-    # make_plot()
-    use_torchdiffeq()
+def make_landscape_plot():
+    from viz.landscape_plot import LandscapePlot
+    import pandas as pd
+    lp = LandscapePlot()
 
+    env = ReacherControlledEnv()
+    env.seed()
+    env.reset()
+    s = torch.from_numpy(env.traj.states)
+    o = env._get_obs_from_state(torch.cat((s, s), dim=1))
+    lp.add(xy=pd.DataFrame(o[:, 2:4], index=np.arange(len(s)), columns=['x2', 'y2']), z=torch.abs(s[:, 3:4]))
+    lp.plot(f'../img/test')
+    env.close()
+
+if __name__ == '__main__':
+    make_video()
 
 
 

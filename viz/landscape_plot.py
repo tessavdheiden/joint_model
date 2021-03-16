@@ -17,7 +17,7 @@ class LandscapePlot(object):
             x = self.xy[xname].values
             y = self.xy[yname].values
             fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(5, 4))
-            c = ax.hexbin(x, y, gridsize=20, C=self.z[:], mincnt=1, vmin=self.z.mean() - .1)
+            c = ax.hexbin(x, y, gridsize=40, C=self.z[:], mincnt=1)
             plt.colorbar(c)
             ax.set_xlabel(to_latex(xname))
             ax.set_ylabel(to_latex(yname))
