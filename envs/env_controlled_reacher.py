@@ -7,12 +7,12 @@ from numpy import pi, cos, sin
 
 
 from envs.env_abs import AbsEnv
-from envs.misc import Trajectory
+from envs.misc import Trajectory, rk4, angle_normalize
 
 
-class Env(AbsEnv):
+
+class ReacherControlledEnv(nn.Module, AbsEnv):
     dt = .1
-    TARGET_CHANGE = .05
 
     LINK_LENGTH_1 = 1.  # [m]
     LINK_LENGTH_2 = 1.  # [m]
@@ -21,10 +21,6 @@ class Env(AbsEnv):
 
     MAX_VEL_1 = 4 * pi
     MAX_VEL_2 = 9 * pi
-
-    MAX_GAIN_P = 2.
-    MAX_GAIN_D = 1.
-    MAX_GAIN_CHANGE = 1.
 
     MAX_TORQUE = 1.
 
@@ -52,36 +48,14 @@ class Env(AbsEnv):
     grab_counter = 0
 
     def __init__(self):
-        pass
-
-    def _dsdt(self, s_augmented, t):
-        m1 = self.LINK_MASS_1
-        m2 = self.LINK_MASS_2
-        L1 = self.LINK_LENGTH_1
-        L2 = self.LINK_LENGTH_2
-        a = s_augmented[-2:]
-        s = s_augmented[:-2]
-        theta1 = s[0]
-        theta2 = s[1]
-        dtheta1 = s[2]
-        dtheta2 = s[3]
-        tau1 = a[0]
-        tau2 = a[1]
-
-        # run equations_of_motion() to compute these
-        ddtheta1 = (-L1 * np.cos(theta2) - L2) * (-L1 * L2 * dtheta1 ** 2 * m2 * np.sin(theta2) + tau2) / (
-                    L1 ** 2 * L2 * m1 - L1 ** 2 * L2 * m2 * np.cos(theta2) ** 2 + L1 ** 2 * L2 * m2) + (
-                               L1 * L2 * m2 * (2 * dtheta1 * dtheta2 + dtheta2 ** 2) * np.sin(theta2) + tau1) / (
-                               L1 ** 2 * m1 - L1 ** 2 * m2 * np.cos(theta2) ** 2 + L1 ** 2 * m2)
-        ddtheta2 = (-L1 * np.cos(theta2) - L2) * (
-                    L1 * L2 * m2 * (2 * dtheta1 * dtheta2 + dtheta2 ** 2) * np.sin(theta2) + tau1) / (
-                               L1 ** 2 * L2 * m1 - L1 ** 2 * L2 * m2 * np.cos(theta2) ** 2 + L1 ** 2 * L2 * m2) + (
-                               -L1 * L2 * dtheta1 ** 2 * m2 * np.sin(theta2) + tau2) * (
-                               L1 ** 2 * m1 + L1 ** 2 * m2 + 2 * L1 * L2 * m2 * np.cos(theta2) + L2 ** 2 * m2) / (
-                               L1 ** 2 * L2 ** 2 * m1 * m2 - L1 ** 2 * L2 ** 2 * m2 ** 2 * np.cos(
-                           theta2) ** 2 + L1 ** 2 * L2 ** 2 * m2 ** 2)
-
-        return (dtheta1, dtheta2, ddtheta1, ddtheta2, 0., 0.)
+        super(ReacherControlledEnv, self).__init__()
+        self.name = 'controlled_reacher'
+        self.state = np.zeros(8)
+        self.t0 = nn.Parameter(torch.tensor([0.0]))
+        self.n = 4
+        self.traj = Trajectory(800, 3, self.dt)
+        self.state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'θ1r', 'θ2r', 'dotθ1r', 'dotθ2r']
+        self.obs_names = ['x1', 'y1', 'x2', 'y2', 'ω1', 'ω2', 'x1r', 'y1r', 'x2r', 'y2r', 'ω1r', 'ω2r']
 
     def step(self, u):
         x, dotx, t, dott = self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8]
@@ -98,9 +72,7 @@ class Env(AbsEnv):
             x_ = rk4(self._dsdt, np.hstack([x, dotx, torque]), [0, self.dt])[-1]
             x = x_[:2]
             dotx = x_[2:4]
-            # t_ = rk4(self._dsdt, np.hstack([t, dott, torque]), [0, self.dt])[-1]
-            # t = t_[:2]
-            # dott = t_[2:4]
+            # t = t + dott * self.dt
 
         self.state = np.concatenate([x, dotx, t, dott])
         obs = self._get_obs()
@@ -146,7 +118,6 @@ class Env(AbsEnv):
         i = np.random.choice(len(self.traj.states)-self.n - 1)
         self.it = i
         reference = self.traj.states[i].copy()
-        self.state = np.zeros(8)
         x, t = reference[:2], reference[:2]
         dotx, dott = reference[2:4], reference[2:4]
         self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8] = x, dotx, t, dott
@@ -208,25 +179,34 @@ class Env(AbsEnv):
             images.append(self.viewer.render(return_rgb_array=mode == 'rgb_array'))
         return images
 
+    def _dsdt(self, s_augmented, t):
+        m1 = self.LINK_MASS_1
+        m2 = self.LINK_MASS_2
+        L1 = self.LINK_LENGTH_1
+        L2 = self.LINK_LENGTH_2
+        a = s_augmented[-2:]
+        s = s_augmented[:-2]
+        theta1 = s[0]
+        theta2 = s[1]
+        dtheta1 = s[2]
+        dtheta2 = s[3]
+        tau1 = a[0]
+        tau2 = a[1]
 
-class ReacherControlledEnv(nn.Module, Env):
-    def __init__(self):
-        super().__init__()
-        self.name = 'controlled_reacher'
-        self.t0 = nn.Parameter(torch.tensor([0.0]))
-        self.n = 200
-        self.traj = Trajectory(800, 3, self.dt)
+        # run equations_of_motion() to compute these
+        ddtheta1 = (-L1 * np.cos(theta2) - L2) * (-L1 * L2 * dtheta1 ** 2 * m2 * np.sin(theta2) + tau2) / (
+                    L1 ** 2 * L2 * m1 - L1 ** 2 * L2 * m2 * np.cos(theta2) ** 2 + L1 ** 2 * L2 * m2) + (
+                               L1 * L2 * m2 * (2 * dtheta1 * dtheta2 + dtheta2 ** 2) * np.sin(theta2) + tau1) / (
+                               L1 ** 2 * m1 - L1 ** 2 * m2 * np.cos(theta2) ** 2 + L1 ** 2 * m2)
+        ddtheta2 = (-L1 * np.cos(theta2) - L2) * (
+                    L1 * L2 * m2 * (2 * dtheta1 * dtheta2 + dtheta2 ** 2) * np.sin(theta2) + tau1) / (
+                               L1 ** 2 * L2 * m1 - L1 ** 2 * L2 * m2 * np.cos(theta2) ** 2 + L1 ** 2 * L2 * m2) + (
+                               -L1 * L2 * dtheta1 ** 2 * m2 * np.sin(theta2) + tau2) * (
+                               L1 ** 2 * m1 + L1 ** 2 * m2 + 2 * L1 * L2 * m2 * np.cos(theta2) + L2 ** 2 * m2) / (
+                               L1 ** 2 * L2 ** 2 * m1 * m2 - L1 ** 2 * L2 ** 2 * m2 ** 2 * np.cos(
+                           theta2) ** 2 + L1 ** 2 * L2 ** 2 * m2 ** 2)
 
-    def get_initial_obs_action(self):
-        state = torch.from_numpy(self.state).float().unsqueeze(0)
-        target = torch.from_numpy(self.target).float().unsqueeze(0)
-        p = torch.from_numpy(self.p).float().unsqueeze(0)
-        d = torch.from_numpy(self.d).float().unsqueeze(0)
-        s = self._get_obs_from_state(state, target, p, d)
-
-        self.init_s = nn.Parameter(s).squeeze(0)
-        self.init_u = nn.Parameter(torch.tensor([.0, .0, .0, .0]))
-        return self.t0, (self.init_s, self.init_u)
+        return (dtheta1, dtheta2, ddtheta1, ddtheta2, 0., 0.)
 
     def forward(self, t, s):
         m1 = self.LINK_MASS_1
@@ -255,64 +235,39 @@ class ReacherControlledEnv(nn.Module, Env):
 
         return (dtheta1, dtheta2, ddtheta1, ddtheta2, torch.zeros_like(tau1), torch.zeros_like(tau2))
 
+    # def get_initial_obs_action(self):
+    #     state = torch.from_numpy(self.state).float().unsqueeze(0)
+    #     target = torch.from_numpy(self.target).float().unsqueeze(0)
+    #     p = torch.from_numpy(self.p).float().unsqueeze(0)
+    #     d = torch.from_numpy(self.d).float().unsqueeze(0)
+    #     s = self._get_obs_from_state(state, target, p, d)
+    #
+    #     self.init_s = nn.Parameter(s).squeeze(0)
+    #     self.init_u = nn.Parameter(torch.tensor([.0, .0, .0, .0]))
+    #     return self.t0, (self.init_s, self.init_u)
+
     def step_batch(self, x, u, update=False):
-        batch_size = x.shape[0]
-        target = x[:, 8:10]
+        state = self.get_state_from_obs(x)
+        x, dotx, t, dott = state[:, :2], state[:, 2:4], state[:, 4:6], state[:, 6:8]
+        dx, dv = u[:, 0:2], u[:, 2:4]
 
-        u = torch.clamp(u, -self.MAX_GAIN_CHANGE, self.MAX_GAIN_CHANGE)
+        for i in range(self.n):
+            delta_x, delta_v = t - x, dott - dotx
+            ddotx = delta_x * dx + delta_v * dv
+            dotx = dotx + ddotx * self.dt
+            t = t + dott * self.dt
 
-        pos, vel = x[:, :4], x[:, 4:6]
-        angle = torch.cat((torch.atan2(pos[:, 1:2], pos[:, 0:1]), torch.atan2(pos[:, 3:4], pos[:, 2:3])), dim=1)
+            s_aug = (torch.cat((x, dotx), dim=1), ddotx)
+            x_ = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')[0] # leave out action
+            x_ = x_[-1] # last time step
 
-        delta_p = angle_normalize(target - angle)
-        delta_v = -vel
-        if update:
-            self.target = target[0].detach().numpy()
+            t = t + dott * self.dt
+            dotx = x_[:, 2:4]
+            x = torch.where(torch.abs(dotx[:, 1:2]) < 0.1, x, x + dotx * self.dt)
 
-        p = torch.clamp(x[:, 6:7] + u[:, :1] * self.dt, 0.)
-        d = torch.clamp(x[:, 7:8] + u[:, 1:] * self.dt, 0.)
-
-        torque = torch.clamp(p * delta_p + d * delta_v, -self.MAX_TORQUE, self.MAX_TORQUE)
-        s_aug = (torch.cat((angle, vel), dim=1), torque)
-        ns = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')
-        ns, action = ns
-
-        ns = ns[-1] # last time step
-        ns[:, 2:3] = torch.clamp(ns[:, 2:3], -self.MAX_VEL_1, self.MAX_VEL_1)
-        ns[:, 3:4] = torch.clamp(ns[:, 3:4], -self.MAX_VEL_2, self.MAX_VEL_2)
-
-        target = target + self.TARGET_CHANGE
-        return self._get_obs_from_state(ns, target, p, d)
-
-
-def rk4(derivs, y0, t, *args, **kwargs):
-    try:
-        Ny = len(y0)
-    except TypeError:
-        yout = np.zeros((len(t),), np.float_)
-    else:
-        yout = np.zeros((len(t), Ny), np.float_)
-
-    yout[0] = y0
-
-    for i in np.arange(len(t) - 1):
-
-        thist = t[i]
-        dt = t[i + 1] - thist
-        dt2 = dt / 2.0
-        y0 = yout[i]
-
-        k1 = np.asarray(derivs(y0, thist, *args, **kwargs))
-        k2 = np.asarray(derivs(y0 + dt2 * k1, thist + dt2, *args, **kwargs))
-        k3 = np.asarray(derivs(y0 + dt2 * k2, thist + dt2, *args, **kwargs))
-        k4 = np.asarray(derivs(y0 + dt * k3, thist + dt, *args, **kwargs))
-        yout[i + 1] = y0 + dt / 6.0 * (k1 + 2 * k2 + 2 * k3 + k4)
-    return yout
-
-
-def angle_normalize(x):
-    return (((x + pi) % (2 * pi)) - pi)
-
+        state = torch.cat((x, dotx, t, dott), dim=1)
+        obs = self._get_obs_from_state(state)
+        return obs
 
 def make_video():
     from viz.video import Video
@@ -395,9 +350,20 @@ def make_landscape_plot():
     env = ReacherControlledEnv()
     env.seed()
     env.reset()
-    s = torch.from_numpy(env.traj.states)
-    o = env._get_obs_from_state(torch.cat((s, s), dim=1))
-    lp.add(xy=pd.DataFrame(o[:, 2:4], index=np.arange(len(s)), columns=['x2', 'y2']), z=torch.abs(s[:, 3:4]))
+    obsv = []
+    for _ in range(10000):
+        env.reset()
+        a = env.action_space.sample() * 0 + np.array([1., 1., 1., 1.])
+        obs = env.step(a)[0]
+        o = torch.from_numpy(obs).unsqueeze(0)
+        obsv.append(o)
+        #images = env.render(mode='rgb_array')
+
+    obsv = torch.cat(obsv, dim=0).numpy()
+    import matplotlib.pyplot as plt
+    plt.scatter(obsv[:, 2], obsv[:, 3])
+    plt.savefig('../img/test')
+    lp.add(xy=pd.DataFrame(obsv[:, 2:4], index=np.arange(len(obsv)), columns=['x2', 'y2']), z=np.abs(obsv[:, 5:6]))
     lp.plot(f'../img/test')
     env.close()
 

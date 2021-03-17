@@ -44,21 +44,11 @@ class Empowerment(nn.Module):
         self.action_dim = env.action_space.shape[0]
         self.z_dim = env.observation_space.shape[0]
 
-        if env.name == 'controlled_reacher':
-            self.flt_ω = lambda x: x[:, 6:8] # only pd
-            #self.flt_q = lambda x, x_: torch.cat((x[:, :6], x[:, -4:], x_[:, :6]), dim=1)    # except pd at t+1 and Δθ
-            self.flt_q = filter_q
-            self.ω = Net(2, self.action_dim, self.h_dim)
-            self.q = Net(8 + 6*self.n_step, self.action_dim, self.h_dim)
-            self.auto_regressive = None
-            self.opt_q = optim.Adam(self.q.parameters(), lr=1e-4)
-            self.forward = self.fwd_step
-        else:
-            self.ω = Net(self.z_dim, self.action_dim, self.h_dim)
-            self.q = Net(self.z_dim*2, self.action_dim, self.h_dim)
-            self.auto_regressive = Net(self.z_dim * 2 + self.action_dim, self.action_dim, self.h_dim)
-            self.opt_q = optim.Adam(list(self.q.parameters()) + list(self.auto_regressive.parameters()), lr=1e-4)
-            self.forward = self.fwd_n_steps
+        self.ω = Net(self.z_dim, self.action_dim, self.h_dim)
+        self.q = Net(self.z_dim*2, self.action_dim, self.h_dim)
+        self.auto_regressive = Net(self.z_dim * 2 + self.action_dim, self.action_dim, self.h_dim)
+        self.opt_q = optim.Adam(list(self.q.parameters()) + list(self.auto_regressive.parameters()), lr=1e-4)
+        self.forward = self.fwd_n_steps
 
         self.opt_ω = optim.Adam(self.ω.parameters(), lr=1e-5)
 
