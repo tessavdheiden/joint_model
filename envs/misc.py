@@ -7,16 +7,14 @@ def angle_normalize(x):
 
 
 class Trajectory(object):
-    def __init__(self, n, order, dt):
+    def __init__(self, order, dt):
         pf = os.path.join(os.getcwd(), os.path.dirname(__file__), 'traj.npy')
         assert os.path.exists(pf)
-        self.n = n
         with open(pf, 'rb') as f:
             traj = np.load(f)
-        self.N = len(traj)
-        assert self.N / n == int(self.N / n)
+        N = len(traj)
 
-        self.states = np.zeros((self.N, (order+1) * 2))
+        self.states = np.zeros((N, (order+1) * 2))
         self.states[:, :2] = traj
         for i in range(1, order+1):
             l1, r1 = i*2, i*2+2

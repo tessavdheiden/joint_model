@@ -35,10 +35,10 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
 
     # cos/sin of 2 angles, 2 angular vel, 2 angle errors, 2 vel errors, 2 p's, 2 d's
     high = LINK_LENGTH_1 + LINK_LENGTH_2
-    obs_dim = 12  # +2 for cos and sin
+    obs_dim = 16  # +2 for cos and sin
     observation_space = spaces.Box(
         low=-high,
-        high=high, shape=(12,),
+        high=high, shape=(obs_dim,),
         dtype=np.float32
     )
     viewer = None
@@ -50,20 +50,21 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
     def __init__(self):
         super(ReacherControlledEnv, self).__init__()
         self.name = 'controlled_reacher'
-        self.state = np.zeros(8)
+        self.state = np.zeros(12)
         self.t0 = nn.Parameter(torch.tensor([0.0]))
         self.n = 4
-        self.traj = Trajectory(800, 3, self.dt)
-        self.state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'θ1r', 'θ2r', 'dotθ1r', 'dotθ2r']
-        self.obs_names = ['x1', 'y1', 'x2', 'y2', 'ω1', 'ω2', 'x1r', 'y1r', 'x2r', 'y2r', 'ω1r', 'ω2r']
+        self.traj = Trajectory(3, self.dt)
+        self.state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'd1', 'd2', 'θ1r', 'θ2r', 'dotθ1r', 'dotθ2r', 'ddotθ1r', 'ddotθ2r']
+        self.obs_names = ['x1', 'y1', 'x2', 'y2', 'ω1', 'ω2', 'd1', 'd2', 'x1r', 'y1r', 'x2r', 'y2r', 'ω1r', 'ω2r', 'α1r', 'α2r']
 
     def step(self, u):
-        x, dotx, t, dott = self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8]
+        x, dotx, dummy, t, dott, ddott = self.state[0:2], self.state[2:4], self.state[4:6], self.state[6:8], self.state[8:10], self.state[10:12]
         dx, dv = u[0:2], u[2:4]
 
         for i in range(self.n):
             t = self.traj.states[self.it + i, :2]
             dott = self.traj.states[self.it + i, 2:4]
+
             self.states[i] = x
             self.targets[i] = t
             delta_x, delta_v = t - x, dott - dotx
@@ -72,29 +73,30 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
             x_ = rk4(self._dsdt, np.hstack([x, dotx, torque]), [0, self.dt])[-1]
             x = x_[:2]
             dotx = x_[2:4]
-            # t = t + dott * self.dt
+            # t_ = rk4(self._dsdt, np.hstack([t, dott, torque]), [0, self.dt])[-1]
+            # t = t_[:2]
+            # dott = t_[2:4]
 
-        self.state = np.concatenate([x, dotx, t, dott])
+        self.state = np.concatenate([x, dotx, dummy, t, dott, ddott])
         obs = self._get_obs()
         return obs, None, [], {}
 
     def _get_obs(self):
+        x, dotx, dummy, t, dott, ddott = self.state[0:2], self.state[2:4], self.state[4:6], self.state[6:8], self.state[8:10], self.state[10:12]
         l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
-        x = self.state[:2]
         xy1 = np.array([l1*cos(x[0]), l1*sin(x[0])])
         xy2 = xy1 + np.array([l2*cos(x[0]+x[1]), l2*sin(x[0]+x[1])])
 
-        t = self.state[4:6]
         txy1 = np.array([l1 * cos(t[0]), l1 * sin(t[0])])
         txy2 = txy1 + np.array([l2 * cos(t[0] + t[1]), l2 * sin(t[0] + t[1])])
 
-        return np.concatenate([xy1, xy2, self.state[2:4], txy1, txy2, self.state[6:8]])
+        return np.concatenate([xy1, xy2, dotx, dummy, txy1, txy2, dott, ddott])
 
     def get_state_from_obs(self, obs):
         # s = np.random.rand(2) * 2 * pi - pi
         # obs = env._get_obs_from_state(torch.from_numpy(s).unsqueeze(0))
         # assert all(s == env.get_state_from_obs(obs).squeeze(0).numpy())
-        xy1, xy2, dotx, txy1, txy2, dott = obs[:, 0:2], obs[:, 2:4], obs[:, 4:6], obs[:, 6:8], obs[:, 8:10], obs[:, 10:12]
+        xy1, xy2, dotx, dummy, txy1, txy2, dott, ddott = obs[:, 0:2], obs[:, 2:4], obs[:, 4:6], obs[:, 6:8], obs[:, 8:10], obs[:, 10:12], obs[:, 12:14], obs[:, 14:16]
         th1 = torch.atan2(xy1[:, 1:2], xy1[:, 0:1])
         th2 = torch.atan2(xy2[:, 1:2] - xy1[:, 1:2], xy2[:, 0:1] - xy1[:, 0:1]) - th1
         th = torch.cat((th1, th2), dim=1)
@@ -102,17 +104,17 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
         tth1 = torch.atan2(txy1[:, 1:2], txy1[:, 0:1])
         tth2 = torch.atan2(txy2[:, 1:2] - txy1[:, 1:2], txy2[:, 0:1] - txy1[:, 0:1]) - tth1
         tth = torch.cat((tth1, tth2), dim=1)
-        return torch.cat((angle_normalize(th), dotx, angle_normalize(tth), dott), dim=1)
+        return torch.cat((angle_normalize(th), dotx, dummy, angle_normalize(tth), dott, ddott), dim=1)
 
-    def _get_obs_from_state(self, x):
+    def _get_obs_from_state(self, s):
+        x, dotx, dummy, t, dott, ddott = s[:, 0:2], s[:, 2:4], s[:, 4:6], s[:, 6:8], s[:, 8:10], s[:, 10:12]
         l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
         xy1 = torch.cat((l1 * torch.cos(x[:, 0:1]), l1 * torch.sin(x[:, 0:1])), dim=1)
         xy2 = xy1 + torch.cat([l2 * torch.cos(x[:, 0:1] + x[:, 1:2]), l2 * torch.sin(x[:, 0:1] + x[:, 1:2])], dim=1)
 
-        t = x[:, 4:6]
         txy1 = torch.cat([l1 * torch.cos(t[:, 0:1]), l1 * torch.sin(t[:, 0:1])], dim=1)
         txy2 = txy1 + torch.cat([l2 * torch.cos(t[:, 0:1] + t[:, 1:2]), l2 * torch.sin(t[:, 0:1] + t[:, 1:2])], dim=1)
-        return torch.cat((xy1, xy2, x[:, 2:4], txy1, txy2, x[:, 6:8]), dim=1)
+        return torch.cat((xy1, xy2, dotx, dummy, txy1, txy2, dott, ddott), dim=1)
 
     def reset(self):
         i = np.random.choice(len(self.traj.states)-self.n - 1)
@@ -120,7 +122,9 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
         reference = self.traj.states[i].copy()
         x, t = reference[:2], reference[:2]
         dotx, dott = reference[2:4], reference[2:4]
-        self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8] = x, dotx, t, dott
+        ddott = reference[4:6]
+        dummy = np.random.rand(2)
+        self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8], self.state[8:10], self.state[10:12] = x, dotx, dummy, t, dott, ddott
         self.states = np.zeros((self.n, 2))
         self.targets = np.zeros((self.n, 2))
 
@@ -235,25 +239,18 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
 
         return (dtheta1, dtheta2, ddtheta1, ddtheta2, torch.zeros_like(tau1), torch.zeros_like(tau2))
 
-    # def get_initial_obs_action(self):
-    #     state = torch.from_numpy(self.state).float().unsqueeze(0)
-    #     target = torch.from_numpy(self.target).float().unsqueeze(0)
-    #     p = torch.from_numpy(self.p).float().unsqueeze(0)
-    #     d = torch.from_numpy(self.d).float().unsqueeze(0)
-    #     s = self._get_obs_from_state(state, target, p, d)
-    #
-    #     self.init_s = nn.Parameter(s).squeeze(0)
-    #     self.init_u = nn.Parameter(torch.tensor([.0, .0, .0, .0]))
-    #     return self.t0, (self.init_s, self.init_u)
-
     def step_batch(self, x, u, update=False):
         state = self.get_state_from_obs(x)
-        x, dotx, t, dott = state[:, :2], state[:, 2:4], state[:, 4:6], state[:, 6:8]
+        x, dotx, dummy, t, dott, ddott = state[:, :2], state[:, 2:4], state[:, 4:6], state[:, 6:8], state[:, 8:10], state[:, 10:12]
         dx, dv = u[:, 0:2], u[:, 2:4]
 
         for i in range(self.n):
             delta_x, delta_v = t - x, dott - dotx
             ddotx = delta_x * dx + delta_v * dv
+            #ddotx = (delta_x * dx + delta_v * dv) * dummy
+            #dummy = torch.clamp(dummy - abs(ddotx), 0., 1.)
+            #ddotx = torch.clamp(ddotx, -1., 1.)
+
             dotx = dotx + ddotx * self.dt
             t = t + dott * self.dt
 
@@ -261,11 +258,14 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
             x_ = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')[0] # leave out action
             x_ = x_[-1] # last time step
 
+            dott = dott + ddott * self.dt
             t = t + dott * self.dt
             dotx = x_[:, 2:4]
-            x = torch.where(torch.abs(dotx[:, 1:2]) < 0.1, x, x + dotx * self.dt)
+            x = x_[:, 0:2]
+            #x = torch.where(torch.abs(dotx[:, 1:2]) < 0.1, x, x + dotx * self.dt)
+            #x = torch.where(torch.abs(dotx[:, 1:2]) < 0.1, x, x_[:, 0:2])
 
-        state = torch.cat((x, dotx, t, dott), dim=1)
+        state = torch.cat((x, dotx, dummy, t, dott, ddott), dim=1)
         obs = self._get_obs_from_state(state)
         return obs
 

@@ -139,8 +139,8 @@ class ArmFollowShapeEnv(AbsEnv):
         self.target_location = np.zeros(2)
         # self.shape = CircleToSquare((0, 0), 2, 3, 500, r=.75)
         self.shape = Compound()
-        for radius in [.08, .2, .4, .6]:
-            self.shape.add(CircleToSquare((0, 0), 2, 2, 800, r=radius))
+        for radius in [.02, .8]:
+            self.shape.add(CircleToSquare((0, 0), 2, 2, 400, r=radius))
 
         self.viewer = None
 

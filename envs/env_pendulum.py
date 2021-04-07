@@ -45,6 +45,7 @@ class PendulumEnv(AbsEnv):
         self.l = 1.
         self.viewer = None
         self.seed()
+        self.obs_name = ['cos(θ)', 'sin(θ)', 'dotθ']
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)

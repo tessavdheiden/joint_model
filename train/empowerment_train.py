@@ -45,12 +45,14 @@ def train_empowerment(env, empowerment, replay_memory, args, bayes_filter=None):
                 x = torch.from_numpy(x[:, 0])
                 e = empowerment(x)
 
-                # ref_xy = env.get_state_from_obs(x).numpy()
-                # sp.add(xy=ref_xy, z=e)
-                # sp.plot(f'img/empoerment_selection{args.seed}{i}', env.s_min, env.s_max, env.s_min, env.s_max)
-                #x = env.get_state_from_obs(x)
-                lp.add(xy=pd.DataFrame(x, index=np.arange(len(x)), columns=env.obs_names), z=cast(e).reshape(-1, 1))
-                lp.plot(f'img/landscape_selection{args.seed}')
+                if args.state_plot:
+                    x = env.get_state_from_obs(x)
+                    lp.add(xy=pd.DataFrame(x, index=np.arange(len(x)), columns=env.state_names),
+                           z=cast(e).reshape(-1, 1))
+                else:
+                    lp.add(xy=pd.DataFrame(x, index=np.arange(len(x)), columns=env.obs_names),
+                           z=cast(e).reshape(-1, 1))
+                lp.plot(f'img/landscape_selection_seed={args.seed}_ep={i}')
                 empowerment.save_params()
             empowerment.prepare_update()
 
@@ -81,8 +83,9 @@ def main():
                         help='0=bayes filter, 1=bayes filter fully connected')
     parser.add_argument('--use_filter', type=int, default=0, help='0=env, 1=filter')
     parser.add_argument('--n_step', type=int, default=1, help='empowerment calculated over n actions')
-    parser.add_argument('--seed', type=int, default=0, help='seed')
+    parser.add_argument('--seed', type=int, default=1, help='seed')
     parser.add_argument('--load_data', type=bool, default=0, help='generate data')
+    parser.add_argument('--state_plot', type=bool, default=0, help='pendulum needs plot states')
     args = parser.parse_args()
 
     if not os.path.exists('../param'):
