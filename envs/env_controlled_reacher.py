@@ -19,10 +19,10 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
     LINK_MASS_1 = 1.  #: [kg] mass of link 1
     LINK_MASS_2 = 1.  #: [kg] mass of link 2
 
-    MAX_VEL_1 = 4 * pi
-    MAX_VEL_2 = 9 * pi
+    MAX_VEL_1 = .1#4 * pi
+    MAX_VEL_2 = .1#9 * pi
 
-    MAX_TORQUE = 1.
+    MAX_TORQUE = .5
 
     action_dim = 4
     u_high = np.ones(action_dim)
@@ -68,9 +68,9 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
             self.states[i] = x
             self.targets[i] = t
             delta_x, delta_v = t - x, dott - dotx
-            torque = delta_x * dx + delta_v * dv
+            ddott = delta_x * dx + delta_v * dv
 
-            x_ = rk4(self._dsdt, np.hstack([x, dotx, torque]), [0, self.dt])[-1]
+            x_ = rk4(self._dsdt, np.hstack([x, dotx, ddott]), [0, self.dt])[-1]
             x = x_[:2]
             dotx = x_[2:4]
             # t_ = rk4(self._dsdt, np.hstack([t, dott, torque]), [0, self.dt])[-1]
@@ -246,24 +246,20 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
 
         for i in range(self.n):
             delta_x, delta_v = t - x, dott - dotx
-            ddotx = delta_x * dx + delta_v * dv
-            #ddotx = (delta_x * dx + delta_v * dv) * dummy
-            #dummy = torch.clamp(dummy - abs(ddotx), 0., 1.)
-            #ddotx = torch.clamp(ddotx, -1., 1.)
+            ddott = delta_x * dx + delta_v * dv
 
-            dotx = dotx + ddotx * self.dt
-            t = t + dott * self.dt
-
-            s_aug = (torch.cat((x, dotx), dim=1), ddotx)
+            s_aug = (torch.cat((x, dotx), dim=1), ddott)
             x_ = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')[0] # leave out action
             x_ = x_[-1] # last time step
 
-            dott = dott + ddott * self.dt
-            t = t + dott * self.dt
             dotx = x_[:, 2:4]
             x = x_[:, 0:2]
-            #x = torch.where(torch.abs(dotx[:, 1:2]) < 0.1, x, x + dotx * self.dt)
-            #x = torch.where(torch.abs(dotx[:, 1:2]) < 0.1, x, x_[:, 0:2])
+
+            dott = dott + ddott * self.dt
+            t = t + dott * self.dt
+
+            # x = torch.where((torch.abs(dotx[:, 1:2]) < self.MAX_VEL_2) | (torch.abs(dotx[:, 0:1]) < self.MAX_VEL_1), x_[:, 0:2], x)
+            # dotx = torch.where((torch.abs(dotx[:, 1:2]) < self.MAX_VEL_2) | (torch.abs(dotx[:, 0:1]) < self.MAX_VEL_1), x_[:, 2:4], dotx)
 
         state = torch.cat((x, dotx, dummy, t, dott, ddott), dim=1)
         obs = self._get_obs_from_state(state)

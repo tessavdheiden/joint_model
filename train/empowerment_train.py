@@ -52,7 +52,9 @@ def train_empowerment(env, empowerment, replay_memory, args, bayes_filter=None):
                 else:
                     lp.add(xy=pd.DataFrame(x, index=np.arange(len(x)), columns=env.obs_names),
                            z=cast(e).reshape(-1, 1))
-                lp.plot(f'img/landscape_selection_seed={args.seed}_ep={i}')
+                sp.add(x=cast(e).reshape(-1, 1))
+                lp.plot(f'img/landscape_seed={args.seed}_ep={i}')
+                sp.plot(f'img/hist_seed={args.seed}_ep={i}')
                 empowerment.save_params()
             empowerment.prepare_update()
 
@@ -72,7 +74,7 @@ def main():
     parser.add_argument('--seq_length', type=int, default=2, help='sequence length for training')
     parser.add_argument('--batch_size', type=int, default=32, help='minibatch size')
     parser.add_argument('--num_epochs', type=int, default=2001, help='number of epochs')
-    parser.add_argument('--n_trials', type=int, default=50000,
+    parser.add_argument('--n_trials', type=int, default=5000,
                         help='number of data sequences to collect in each episode')
     parser.add_argument('--trial_len', type=int, default=2, help='number of steps in each trial')
     parser.add_argument('--n_subseq', type=int, default=1,
