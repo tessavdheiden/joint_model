@@ -22,8 +22,8 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
     MAX_VEL_1 = .1#4 * pi
     MAX_VEL_2 = .1#9 * pi
 
-    MAX_TORQUE = .5
-
+    MAX_TORQUE = 0.05
+    n = 4
     action_dim = 4
     u_high = np.ones(action_dim)
     u_low = -u_high
@@ -52,7 +52,6 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
         self.name = 'controlled_reacher'
         self.state = np.zeros(12)
         self.t0 = nn.Parameter(torch.tensor([0.0]))
-        self.n = 4
         self.traj = Trajectory(3, self.dt)
         self.state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'd1', 'd2', 'θ1r', 'θ2r', 'dotθ1r', 'dotθ2r', 'ddotθ1r', 'ddotθ2r']
         self.obs_names = ['x1', 'y1', 'x2', 'y2', 'ω1', 'ω2', 'd1', 'd2', 'x1r', 'y1r', 'x2r', 'y2r', 'ω1r', 'ω2r', 'α1r', 'α2r']
@@ -68,18 +67,54 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
             self.states[i] = x
             self.targets[i] = t
             delta_x, delta_v = t - x, dott - dotx
-            ddott = delta_x * dx + delta_v * dv
+            ddotx = delta_x * dx + delta_v * dv
 
-            x_ = rk4(self._dsdt, np.hstack([x, dotx, ddott]), [0, self.dt])[-1]
+            x_ = rk4(self._dsdt, np.hstack([x, dotx, ddotx]), [0, self.dt])[-1]
             x = x_[:2]
             dotx = x_[2:4]
             # t_ = rk4(self._dsdt, np.hstack([t, dott, torque]), [0, self.dt])[-1]
             # t = t_[:2]
             # dott = t_[2:4]
 
-        self.state = np.concatenate([x, dotx, dummy, t, dott, ddott])
+        self.state = np.concatenate([x, dotx, ddotx, t, dott, ddott])
         obs = self._get_obs()
         return obs, None, [], {}
+
+    def step_batch(self, x, u):
+        state = self.get_state_from_obs(x)
+        x, dotx, dummy, t, dott, ddott = state[:, :2], state[:, 2:4], state[:, 4], state[:, 6:8], state[:, 8:10], state[:, 10:12]
+
+        #traj = torch.from_numpy(self.traj.states)
+
+        for i in range(self.n):
+            # target = torch.index_select(traj, 1, it+i)
+            # t = target[:, 0:2]
+            # dott = target[:, 2:4]
+
+            delta_x, delta_v = t - x, dott - dotx
+            # ddotx = delta_x * u[:, i*2:i*2+2] + delta_v * u[:, self.n*2+i*2:self.n*2+i*2+2]
+            ddotx = delta_x * u[:, :2] + delta_v * u[:, 2:4]
+
+            s_aug = (torch.cat((x, dotx), dim=1), ddotx)
+            x_ = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')[0]  # leave out action
+            x_ = x_[-1]  # last time step
+
+            dott = dott + ddott * self.dt
+            t = t + dott * self.dt
+
+            #x, dotx = torch.split(x_, 2, dim=1)
+            dotx = x_[:, 2:4]
+            x = x_[:, 0:2]
+
+        state = torch.cat((x, dotx, ddotx, t * 0., dott * 0., ddott * 0.), dim=1)
+        obs = self._get_obs_from_state(state)
+        return obs
+
+    def _get_pos_from_angle(self, x):
+        l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
+        xy1 = torch.cat((l1 * torch.cos(x[:, 0:1]), l1 * torch.sin(x[:, 0:1])), dim=1)
+        xy2 = xy1 + torch.cat([l2 * torch.cos(x[:, 0:1] + x[:, 1:2]), l2 * torch.sin(x[:, 0:1] + x[:, 1:2])], dim=1)
+        return torch.cat((xy1, xy2), dim=1)
 
     def _get_obs(self):
         x, dotx, dummy, t, dott, ddott = self.state[0:2], self.state[2:4], self.state[4:6], self.state[6:8], self.state[8:10], self.state[10:12]
@@ -122,9 +157,8 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
         reference = self.traj.states[i].copy()
         x, t = reference[:2], reference[:2]
         dotx, dott = reference[2:4], reference[2:4]
-        ddott = reference[4:6]
-        dummy = np.random.rand(2)
-        self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8], self.state[8:10], self.state[10:12] = x, dotx, dummy, t, dott, ddott
+        ddott, ddotx = reference[4:6]
+        self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8], self.state[8:10], self.state[10:12] = x, dotx, ddotx, t, dott, ddott
         self.states = np.zeros((self.n, 2))
         self.targets = np.zeros((self.n, 2))
 
@@ -239,31 +273,49 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
 
         return (dtheta1, dtheta2, ddtheta1, ddtheta2, torch.zeros_like(tau1), torch.zeros_like(tau2))
 
-    def step_batch(self, x, u, update=False):
-        state = self.get_state_from_obs(x)
-        x, dotx, dummy, t, dott, ddott = state[:, :2], state[:, 2:4], state[:, 4:6], state[:, 6:8], state[:, 8:10], state[:, 10:12]
-        dx, dv = u[:, 0:2], u[:, 2:4]
+    # def step_batch(self, x, u, torque_constrained=False, velocity_constrained=False, energy_constrained=False):
+    #     state = self.get_state_from_obs(x)
+    #     x, dotx, dummy, t, dott, ddott = state[:, :2], state[:, 2:4], state[:, 4:6], state[:, 6:8], state[:,
+    #                                                                                                 8:10], state[:,
+    #                                                                                                        10:12]
+    #     dx, dv = u[:, 0:2], u[:, 2:4]
+    #     x_lst = []
+    #     dotx_lst = []
+    #     for i in range(self.n):
+    #         delta_x, delta_v = t - x, dott - dotx
+    #         ddotx = delta_x * dx + delta_v * dv
+    #         if torque_constrained:
+    #             ddotx = torch.clamp(ddotx, -self.MAX_TORQUE, self.MAX_TORQUE)
+    #         elif energy_constrained:
+    #             ddotx = ddotx * dummy
+    #             dummy = dummy - ddotx
+    #
+    #         s_aug = (torch.cat((x, dotx), dim=1), ddotx)
+    #         x_ = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')[0]  # leave out action
+    #         x_ = x_[-1]  # last time step
+    #
+    #         dott = dott + ddott * self.dt
+    #         t = t + dott * self.dt
+    #
+    #         if velocity_constrained:
+    #             outside_constraint = (torch.abs(x_[:, 3:4]) > self.MAX_VEL_2) | \
+    #                                  (torch.abs(x_[:, 2:3]) > self.MAX_VEL_1)
+    #             dotx = torch.where(outside_constraint, x_[:, 2:4], dotx)
+    #             x = torch.where(outside_constraint, x_[:, 0:2], x)
+    #         else:
+    #             dotx = x_[:, 2:4]
+    #             x = x_[:, 0:2]
+    #
+    #         x_lst.append(self._get_pos_from_angle(x))
+    #         dotx_lst.append(dotx)
+    #
+    #     state = torch.cat((x, dotx, ddotx * 0., t * 0., dott * 0., ddott * 0.), dim=1)
+    #     x = torch.cat(x_lst, dim=1)
+    #     dotx = torch.cat(dotx_lst, dim=1)
+    #     #obs = self._get_obs_from_state(state)
+    #     obs = torch.cat((x[:, :10], dotx), dim=1)
+    #     return obs
 
-        for i in range(self.n):
-            delta_x, delta_v = t - x, dott - dotx
-            ddott = delta_x * dx + delta_v * dv
-
-            s_aug = (torch.cat((x, dotx), dim=1), ddott)
-            x_ = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')[0] # leave out action
-            x_ = x_[-1] # last time step
-
-            dotx = x_[:, 2:4]
-            x = x_[:, 0:2]
-
-            dott = dott + ddott * self.dt
-            t = t + dott * self.dt
-
-            # x = torch.where((torch.abs(dotx[:, 1:2]) < self.MAX_VEL_2) | (torch.abs(dotx[:, 0:1]) < self.MAX_VEL_1), x_[:, 0:2], x)
-            # dotx = torch.where((torch.abs(dotx[:, 1:2]) < self.MAX_VEL_2) | (torch.abs(dotx[:, 0:1]) < self.MAX_VEL_1), x_[:, 2:4], dotx)
-
-        state = torch.cat((x, dotx, dummy, t, dott, ddott), dim=1)
-        obs = self._get_obs_from_state(state)
-        return obs
 
 def make_video():
     from viz.video import Video
@@ -359,12 +411,12 @@ def make_landscape_plot():
     import matplotlib.pyplot as plt
     plt.scatter(obsv[:, 2], obsv[:, 3])
     plt.savefig('../img/test')
-    lp.add(xy=pd.DataFrame(obsv[:, 2:4], index=np.arange(len(obsv)), columns=['x2', 'y2']), z=np.abs(obsv[:, 5:6]))
+    lp.add(xy=pd.DataFrame(obsv[:, 2:4], index=np.arange(len(obsv)), columns=['x2', 'y2']), z=np.abs(obsv[:, 6:7]))
     lp.plot(f'../img/test')
     env.close()
 
 if __name__ == '__main__':
-    make_video()
+    make_landscape_plot()
 
 
 

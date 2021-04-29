@@ -14,7 +14,6 @@ class SelectionPlot(object):
 
     def plot(self, save_path):
         plt.hist(self.x, density=True, bins=20)
-        plt.legend()
         plt.tight_layout()
         plt.savefig(f'{save_path}.png')
         plt.close()
