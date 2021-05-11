@@ -24,7 +24,7 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
 
     MAX_TORQUE = 0.05
     n = 4
-    action_dim = 4
+    action_dim = 4 * n
     u_high = np.ones(action_dim)
     u_low = -u_high
     action_space = spaces.Box(
@@ -52,9 +52,15 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
         self.name = 'controlled_reacher'
         self.state = np.zeros(12)
         self.t0 = nn.Parameter(torch.tensor([0.0]))
-        self.traj = Trajectory(3, self.dt)
+        self.traj = Trajectory(3, .1)
         self.state_names = ['θ1', 'θ2', 'dotθ1', 'dotθ2', 'd1', 'd2', 'θ1r', 'θ2r', 'dotθ1r', 'dotθ2r', 'ddotθ1r', 'ddotθ2r']
         self.obs_names = ['x1', 'y1', 'x2', 'y2', 'ω1', 'ω2', 'd1', 'd2', 'x1r', 'y1r', 'x2r', 'y2r', 'ω1r', 'ω2r', 'α1r', 'α2r']
+        self.return_list = False
+        if self.return_list:
+            self.next_observation_space = spaces.Box(
+                low=-1,
+                high=1, shape=(4*self.n+2*self.n,),
+                dtype=np.float32)
 
     def step(self, u):
         x, dotx, dummy, t, dott, ddott = self.state[0:2], self.state[2:4], self.state[4:6], self.state[6:8], self.state[8:10], self.state[10:12]
@@ -80,35 +86,59 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
         obs = self._get_obs()
         return obs, None, [], {}
 
+    def interpolate(self):
+
+        time = np.linspace(0, self.traj.N * self.traj.dt, int(self.traj.dt * self.traj.N / self.dt))
+        theta1 = np.interp(time, self.traj.t, self.traj.states[:, 0])
+        theta2 = np.interp(time, self.traj.t, self.traj.states[:, 1])
+        dtheta1 = np.interp(time, self.traj.t, self.traj.states[:, 2])
+        dtheta2 = np.interp(time, self.traj.t, self.traj.states[:, 3])
+
+        return np.stack((theta1, theta2, dtheta1, dtheta2), axis=-1)
+
     def step_batch(self, x, u):
         state = self.get_state_from_obs(x)
-        x, dotx, dummy, t, dott, ddott = state[:, :2], state[:, 2:4], state[:, 4], state[:, 6:8], state[:, 8:10], state[:, 10:12]
+        x, dotx, it, t, dott, ddott = state[:, :2], state[:, 2:4], state[:, 4], state[:, 6:8], state[:, 8:10], state[:, 10:12]
 
-        #traj = torch.from_numpy(self.traj.states)
-
+        targets = torch.from_numpy(self.interpolate())  # dim=(self.traj.dt * self.traj.N // self.dt, 4)
+        lst_x = []
+        lst_dotx = []
         for i in range(self.n):
-            # target = torch.index_select(traj, 1, it+i)
-            # t = target[:, 0:2]
-            # dott = target[:, 2:4]
+            target = torch.index_select(targets, 0, torch.remainder(it.type(torch.int64) + i, targets.shape[0]))
+
+            t = target[:, 0:2].type(torch.float32)
+            dott = target[:, 2:4].type(torch.float32)
 
             delta_x, delta_v = t - x, dott - dotx
-            # ddotx = delta_x * u[:, i*2:i*2+2] + delta_v * u[:, self.n*2+i*2:self.n*2+i*2+2]
-            ddotx = delta_x * u[:, :2] + delta_v * u[:, 2:4]
+            ddotx = delta_x * u[:, i*2:i*2+2] + delta_v * u[:, self.n*2+i*2:self.n*2+i*2+2]
+            # ddotx = delta_x * u[:, :2] + delta_v * u[:, 2:4]
 
             s_aug = (torch.cat((x, dotx), dim=1), ddotx)
             x_ = odeint(self, s_aug, torch.tensor([0, self.dt]), method='rk4')[0]  # leave out action
             x_ = x_[-1]  # last time step
-
-            dott = dott + ddott * self.dt
-            t = t + dott * self.dt
-
-            #x, dotx = torch.split(x_, 2, dim=1)
             dotx = x_[:, 2:4]
             x = x_[:, 0:2]
 
-        state = torch.cat((x, dotx, ddotx, t * 0., dott * 0., ddott * 0.), dim=1)
-        obs = self._get_obs_from_state(state)
-        return obs
+            lst_x.append(self._get_pos_from_angle(x))
+            lst_dotx.append(dotx)
+
+            # dott = dott + ddott * self.dt
+            # t = t + dott * self.dt
+
+        if self.return_list:
+            x = torch.cat(lst_x, dim=1)
+            dotx = torch.cat(lst_dotx, dim=1)
+            return torch.cat((x, dotx), dim=1)
+        else:
+            state = torch.cat((x, dotx, ddotx * 0., t * 0., dott * 0., ddott * 0.), dim=1)
+            obs = self._get_obs_from_state(state)
+            return obs
+
+    def get_pos_from_angle(self, x):
+        l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
+        xy1 = np.stack((l1 * np.cos(x[:, 0]), l1 * np.sin(x[:, 0])), axis=1)
+        xy2 = xy1 + np.stack([l2 * np.cos(x[:, 0] + x[:, 1]), l2 * np.sin(x[:, 0] + x[:, 1])], axis=1)
+        return np.concatenate((xy1, xy2), axis=1)
 
     def _get_pos_from_angle(self, x):
         l1, l2 = self.LINK_LENGTH_1, self.LINK_LENGTH_2
@@ -158,9 +188,11 @@ class ReacherControlledEnv(nn.Module, AbsEnv):
         x, t = reference[:2], reference[:2]
         dotx, dott = reference[2:4], reference[2:4]
         ddott, ddotx = reference[4:6]
-        self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8], self.state[8:10], self.state[10:12] = x, dotx, ddotx, t, dott, ddott
+        self.state[:2], self.state[2:4], self.state[4:6], self.state[6:8], self.state[8:10], self.state[10:12] = x, dotx, i, t, dott, ddott
         self.states = np.zeros((self.n, 2))
         self.targets = np.zeros((self.n, 2))
+
+        self.t_traj = torch.from_numpy(self.traj.states)
 
         return self._get_obs()
 
@@ -415,8 +447,19 @@ def make_landscape_plot():
     lp.plot(f'../img/test')
     env.close()
 
+def plot_traj():
+    import matplotlib.pyplot as plt
+    env = ReacherControlledEnv()
+    a = env.traj.states[:, 0:2]
+    xy = env.get_pos_from_angle(a)
+    plt.scatter(xy[:, 2], xy[:, 3], s=.5)
+    plt.savefig(f'../img/test.png')
+
+
 if __name__ == '__main__':
-    make_landscape_plot()
+    plot_traj()
+
+
 
 
 

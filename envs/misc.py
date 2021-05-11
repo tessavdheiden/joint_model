@@ -12,9 +12,11 @@ class Trajectory(object):
         assert os.path.exists(pf)
         with open(pf, 'rb') as f:
             traj = np.load(f)
-        N = len(traj)
+        self.N = len(traj)
+        self.dt = dt
+        self.t = np.arange(0, self.N) * self.dt
 
-        self.states = np.zeros((N, (order+1) * 2))
+        self.states = np.zeros((self.N, (order+1) * 2))
         self.states[:, :2] = traj
         for i in range(1, order+1):
             l1, r1 = i*2, i*2+2

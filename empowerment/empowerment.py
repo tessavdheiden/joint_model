@@ -45,7 +45,10 @@ class Empowerment(nn.Module):
         self.z_dim = env.observation_space.shape[0]
 
         self.ω = Net(self.z_dim, self.action_dim, self.h_dim)
-        self.q = Net(self.z_dim*2, self.action_dim, self.h_dim)
+        if hasattr(env, 'next_observation_space'):
+            self.q = Net(self.z_dim + env.next_observation_space.shape[0], self.action_dim, self.h_dim)
+        else:
+            self.q = Net(self.z_dim*2, self.action_dim, self.h_dim)
         self.auto_regressive = Net(self.z_dim * 2 + self.action_dim, self.action_dim, self.h_dim)
         self.opt_q = optim.Adam(list(self.q.parameters()) + list(self.auto_regressive.parameters()), lr=1e-4)
         self.forward = self.fwd_n_steps
